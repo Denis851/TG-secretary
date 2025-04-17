@@ -1,0 +1,45 @@
+# 👉 Виртуальное окружение Python
+venv/
+ENV/
+env/
+
+# 👉 Кэш и скомпилированные файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# 👉 Системные файлы macOS
+.DS_Store
+._*
+
+# 👉 Файлы, созданные IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# 👉 Jupyter ноутбуки кэш
+.ipynb_checkpoints/
+
+# 👉 Логи, временные файлы
+*.log
+*.tmp
+*.bak
+
+# Project specific
+data/*.json
+reports/*.pdf
+fonts/*.ttf
+
