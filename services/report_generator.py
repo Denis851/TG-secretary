@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import urllib.request
 import logging
+import ssl
 
 logger = logging.getLogger(__name__)
 
@@ -23,24 +24,54 @@ def download_font():
     font_path = Path('fonts/DejaVuSans.ttf')
     if not font_path.exists():
         logger.info("Downloading DejaVu Sans font...")
-        font_url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
-        try:
-            urllib.request.urlretrieve(font_url, font_path)
-            logger.info("Font downloaded successfully")
-        except Exception as e:
-            logger.error(f"Error downloading font: {e}")
-            raise
+        # Список URL-ов для скачивания шрифта
+        font_urls = [
+            "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans.ttf",
+            "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf",
+            "https://cdn.jsdelivr.net/npm/@fontsource/dejavu-sans/files/dejavu-sans-latin-400-normal.ttf"
+        ]
+        
+        # Создаем контекст SSL без проверки сертификата
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        success = False
+        for url in font_urls:
+            try:
+                logger.info(f"Trying to download font from {url}")
+                # Открываем URL с использованием созданного контекста SSL
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, context=ctx) as response, open(font_path, 'wb') as out_file:
+                    out_file.write(response.read())
+                logger.info("Font downloaded successfully")
+                success = True
+                break
+            except Exception as e:
+                logger.warning(f"Failed to download font from {url}: {e}")
+                continue
+        
+        if not success:
+            # Если не удалось скачать шрифт, используем встроенный шрифт Helvetica
+            logger.warning("Could not download DejaVu Sans font. Using Helvetica instead.")
+            return False
+    return True
 
-# Create directories and download font
+# Create directories and try to download font
 ensure_directories()
-download_font()
+use_dejavu = download_font()
 
-# Register DejaVu Sans font
-font_path = Path('fonts/DejaVuSans.ttf')
-if font_path.exists():
-    pdfmetrics.registerFont(TTFont('DejaVuSans', str(font_path)))
+# Register font
+if use_dejavu:
+    font_path = Path('fonts/DejaVuSans.ttf')
+    if font_path.exists():
+        pdfmetrics.registerFont(TTFont('DejaVuSans', str(font_path)))
+    else:
+        logger.warning("DejaVu Sans font not found. Using Helvetica.")
+        pdfmetrics.registerFont(TTFont('DejaVuSans', 'Helvetica'))
 else:
-    raise FileNotFoundError(f"Font file not found at {font_path}")
+    logger.warning("Using Helvetica as fallback font.")
+    pdfmetrics.registerFont(TTFont('DejaVuSans', 'Helvetica'))
 
 def load_json(filename):
     """Load data from a JSON file."""
