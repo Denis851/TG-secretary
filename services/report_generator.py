@@ -2,6 +2,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.pdfmetrics import registerFont, registerFontFamily
 import json
 from datetime import datetime, timedelta
 import os
@@ -52,8 +53,7 @@ def download_font():
                 continue
         
         if not success:
-            # Если не удалось скачать шрифт, используем встроенный шрифт Helvetica
-            logger.warning("Could not download DejaVu Sans font. Using Helvetica instead.")
+            logger.warning("Could not download DejaVu Sans font. Using built-in fonts.")
             return False
     return True
 
@@ -62,16 +62,29 @@ ensure_directories()
 use_dejavu = download_font()
 
 # Register font
+FONT_NAME = 'CustomFont'  # Используем одно имя шрифта для всех случаев
 if use_dejavu:
     font_path = Path('fonts/DejaVuSans.ttf')
     if font_path.exists():
-        pdfmetrics.registerFont(TTFont('DejaVuSans', str(font_path)))
+        try:
+            pdfmetrics.registerFont(TTFont(FONT_NAME, str(font_path)))
+            logger.info("DejaVu Sans font registered successfully")
+        except Exception as e:
+            logger.error(f"Error registering DejaVu Sans font: {e}")
+            # В случае ошибки регистрации TTF используем встроенные шрифты
+            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+            pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+            FONT_NAME = 'HeiseiKakuGo-W5'
     else:
-        logger.warning("DejaVu Sans font not found. Using Helvetica.")
-        pdfmetrics.registerFont(TTFont('DejaVuSans', 'Helvetica'))
+        logger.warning("DejaVu Sans font file not found. Using built-in font.")
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+        FONT_NAME = 'HeiseiKakuGo-W5'
 else:
-    logger.warning("Using Helvetica as fallback font.")
-    pdfmetrics.registerFont(TTFont('DejaVuSans', 'Helvetica'))
+    logger.warning("Using built-in font.")
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+    FONT_NAME = 'HeiseiKakuGo-W5'
 
 def load_json(filename):
     """Load data from a JSON file."""
@@ -154,15 +167,15 @@ def generate_full_report(output_path):
         line_height = 20
         
         # Title
-        c.setFont('DejaVuSans', 14)
+        c.setFont(FONT_NAME, 14)
         now = datetime.now()
         date_str = now.strftime("%d.%m.%Y")
         title = f'Отчет по продуктивности ({date_str})'
-        c.drawString((width - c.stringWidth(title, 'DejaVuSans', 14)) / 2, y, title)
+        c.drawString((width - c.stringWidth(title, FONT_NAME, 14)) / 2, y, title)
         y -= line_height * 2
         
         # Goals section
-        c.setFont('DejaVuSans', 12)
+        c.setFont(FONT_NAME, 12)
         c.drawString(50, y, 'Цели:')
         y -= line_height
         
@@ -170,7 +183,7 @@ def generate_full_report(output_path):
         if goals:
             for goal in goals:
                 text = format_goal(goal)
-                y = draw_wrapped_text(c, text, 50, y, width - 100, 'DejaVuSans', 12, line_height)
+                y = draw_wrapped_text(c, text, 50, y, width - 100, FONT_NAME, 12, line_height)
         else:
             c.drawString(50, y, 'Нет активных целей')
             y -= line_height
@@ -180,7 +193,7 @@ def generate_full_report(output_path):
         if y < 100:  # Check if we need a new page
             c.showPage()
             y = height - 50
-            c.setFont('DejaVuSans', 12)
+            c.setFont(FONT_NAME, 12)
         
         c.drawString(50, y, 'Задачи на сегодня:')
         y -= line_height
@@ -189,7 +202,7 @@ def generate_full_report(output_path):
         if tasks:
             for task in tasks:
                 text = format_task(task)
-                y = draw_wrapped_text(c, text, 50, y, width - 100, 'DejaVuSans', 12, line_height)
+                y = draw_wrapped_text(c, text, 50, y, width - 100, FONT_NAME, 12, line_height)
         else:
             c.drawString(50, y, 'Нет активных задач')
             y -= line_height
@@ -199,7 +212,7 @@ def generate_full_report(output_path):
         if y < 150:  # Check if we need a new page
             c.showPage()
             y = height - 50
-            c.setFont('DejaVuSans', 12)
+            c.setFont(FONT_NAME, 12)
         
         c.drawString(50, y, 'Анализ продуктивности за неделю:')
         y -= line_height
@@ -251,7 +264,8 @@ def generate_full_report(output_path):
         
         # Save the report
         c.save()
-        print(f"Report successfully generated at {output_path}")
+        logger.info(f"Report successfully generated at {output_path}")
         
     except Exception as e:
-        raise Exception(f"Failed to generate report: {str(e)}")
+        logger.error(f"Failed to generate report: {str(e)}")
+        raise
