@@ -6,6 +6,7 @@ from services.storage import schedule_storage, ValidationError
 from datetime import datetime
 import re
 import random
+import logging
 
 router = Router()
 quotes = [
@@ -15,15 +16,6 @@ quotes = [
     "Никогда не поздно быть тем, кем ты мог бы быть. — Джордж Элиот",
     "Будущее принадлежит тем, кто верит в красоту своей мечты. — Элеонора Рузвельт"
 ]
-
-def validate_time_format(time_str: str) -> bool:
-    """Проверяет формат времени (HH:MM)"""
-    pattern = r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$'
-    return bool(re.match(pattern, time_str))
-
-def sort_schedule_by_time(schedule):
-    """Сортирует расписание по времени"""
-    return sorted(schedule, key=lambda x: datetime.strptime(x.get("time", "00:00"), "%H:%M"))
 
 def generate_schedule_keyboard(schedule, show_controls=True):
     keyboard = []
@@ -197,3 +189,92 @@ async def view_schedule_entry(callback: CallbackQuery):
             await callback.answer("❌ Ошибка: неправильный индекс", show_alert=True)
     except Exception as e:
         await callback.answer(f"❌ Произошла ошибка: {str(e)}", show_alert=True)
+
+@router.callback_query(F.data.startswith("delete_schedule:"))
+async def delete_schedule_entry(callback: CallbackQuery, state: FSMContext):
+    """Delete a schedule entry."""
+    try:
+        entry_idx = int(callback.data.split(":")[1])
+        schedule = schedule_storage.get_schedule()
+        
+        if not 0 <= entry_idx < len(schedule):
+            await callback.answer("Ошибка: запись не найдена", show_alert=True)
+            return
+            
+        schedule_storage.delete_entry(entry_idx)
+        
+        # Получаем обновленное расписание и генерируем новую клавиатуру
+        updated_schedule = schedule_storage.get_schedule()
+        keyboard, message_text = generate_schedule_keyboard(updated_schedule)
+        
+        await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+        await callback.answer("Запись удалена")
+    except Exception as e:
+        logger.error(f"Error in delete_schedule_entry: {str(e)}")
+        await callback.answer("Произошла ошибка при удалении записи", show_alert=True)
+
+@router.callback_query(F.data.startswith("edit_schedule:"))
+async def start_edit_schedule(callback: CallbackQuery, state: FSMContext):
+    """Start editing a schedule entry."""
+    try:
+        entry_idx = int(callback.data.split(":")[1])
+        schedule = schedule_storage.get_schedule()
+        
+        if not 0 <= entry_idx < len(schedule):
+            await callback.answer("Ошибка: запись не найдена", show_alert=True)
+            return
+            
+        entry = schedule[entry_idx]
+        await state.update_data(editing_entry_idx=entry_idx)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✏️ Изменить текст", callback_data=f"edit_schedule_text:{entry_idx}"),
+                InlineKeyboardButton(text="⏰ Изменить время", callback_data=f"edit_schedule_time:{entry_idx}")
+            ],
+            [
+                InlineKeyboardButton(text="❌ Отмена", callback_data="show_schedule")
+            ]
+        ])
+        
+        await callback.message.edit_text(
+            text=f"Редактирование записи:\n{entry['time']} - {entry['text']}",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in start_edit_schedule: {str(e)}")
+        await callback.answer("Произошла ошибка при начале редактирования", show_alert=True)
+
+@router.callback_query(F.data == "show_schedule")
+async def show_schedule(callback: CallbackQuery, state: FSMContext):
+    """Show the schedule."""
+    try:
+        schedule = schedule_storage.get_schedule()
+        keyboard, message_text = generate_schedule_keyboard(schedule)
+        await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+        await callback.answer()
+        await state.clear()
+    except Exception as e:
+        logger.error(f"Error in show_schedule: {str(e)}")
+        await callback.answer("Произошла ошибка при отображении расписания", show_alert=True)
+
+@router.callback_query(F.data.startswith("schedule_sort:"))
+async def sort_schedule(callback: CallbackQuery):
+    """Sort schedule entries based on selected criteria."""
+    try:
+        sort_type = callback.data.split(":")[1]
+        schedule = schedule_storage.get_schedule()
+        
+        if sort_type == "time":
+            schedule.sort(key=lambda x: x.get("time", "00:00"))
+        elif sort_type == "date":
+            schedule.sort(key=lambda x: x.get("created_at", ""))
+        
+        schedule_storage.save_data(schedule)
+        keyboard, message_text = generate_schedule_keyboard(schedule)
+        await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in sort_schedule: {str(e)}")
+        await callback.answer("Произошла ошибка при сортировке расписания", show_alert=True)

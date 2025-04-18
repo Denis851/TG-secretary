@@ -2,13 +2,18 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from services.storage import goal_storage, ValidationError, StorageError
+from services.storage import GoalStorage
 from keyboards.goals import GoalsKeyboard
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import json
 import os
 import re
+from constants.icons import STATUS_ICONS, PRIORITY_ICONS, TIME_ICONS, ACTION_ICONS, NAVIGATION_ICONS
+import logging
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 # Путь к файлу для хранения целей
 GOALS_FILE = "data/goals.json"
@@ -34,43 +39,17 @@ def save_goals(goals: List[Dict[str, Any]]) -> None:
     except Exception as e:
         print(f"Error saving goals: {e}")
 
-# Обновляем иконки
-STATUS_ICONS = {
-    'completed': '✅',
-    'pending': '⬜️',
-    'error': '❌',
-    'success': '✅'
-}
-
-PRIORITY_ICONS = {
-    'high': '🔴',
-    'medium': '🟡',
-    'low': '🟢'
-}
-
-TIME_ICONS = {
-    'deadline': '📅',
-    'calendar': '📆'
-}
-
-ACTION_ICONS = {
-    'add': '➕',
-    'edit': '✏️',
-    'delete': '🗑',
-    'back': '◀️'
-}
-
-NAVIGATION_ICONS = {
-    'sort': '🔄'
-}
-
 router = Router()
+goals_storage = GoalStorage()
 goals_keyboard = GoalsKeyboard()
 
-class AddGoal(StatesGroup):
-    waiting_for_goal_text = State()
+class GoalStates(StatesGroup):
+    waiting_for_text = State()
     waiting_for_priority = State()
     waiting_for_deadline = State()
+    editing_text = State()
+    editing_priority = State()
+    editing_deadline = State()
 
 def format_deadline(deadline: str) -> str:
     """Форматирует дедлайн для отображения"""
@@ -156,271 +135,405 @@ def generate_goals_keyboard(goals: List[Dict[str, Any]], show_sort: bool = False
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 @router.message(F.text == "🎯 Цели")
-async def show_goals(message: Message, state: FSMContext):
+async def show_goals_command(message: Message):
+    """Handle the 'Goals' command."""
     try:
-        goals = load_goals()
-        
-        if not goals:
-            text = "У вас пока нет целей. Добавьте новую цель!"
-        else:
-            text = "🎯 Ваши цели:\n\n"
-            for i, goal in enumerate(goals, 1):
-                text += format_goal_text(goal, i) + "\n"
-        
-        keyboard = generate_goals_keyboard(goals)
-        await message.answer(text=text, reply_markup=keyboard)
+        goals = goals_storage.get_goals()
+        keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
+        await message.answer(text=message_text, reply_markup=keyboard)
     except Exception as e:
-        await message.answer("❌ Произошла ошибка при загрузке целей: " + str(e))
+        logger.error(f"Error in show_goals_command: {str(e)}", exc_info=True)
+        await message.answer(f"❌ Произошла ошибка при загрузке целей: {str(e)}")
 
-@router.callback_query(F.data == "add_goal")
-async def start_add_goal(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "show_goals")
+async def show_goals(callback: CallbackQuery, state: FSMContext):
+    """Show the list of goals."""
     try:
-        await state.set_state(AddGoal.waiting_for_goal_text)
-        await callback.message.answer("Введите текст новой цели:")
+        goals = goals_storage.get_goals()
+        keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
+        await callback.message.edit_text(text=message_text, reply_markup=keyboard)
         await callback.answer()
+        await state.clear()
     except Exception as e:
-        await callback.answer("❌ Произошла ошибка: " + str(e), show_alert=True)
+        logger.error(f"Error in show_goals: {str(e)}")
+        await callback.answer("Произошла ошибка при отображении целей", show_alert=True)
+
+@router.callback_query(F.data == "goals_next_page")
+async def next_page(callback: CallbackQuery, state: FSMContext):
+    """Show the next page of goals."""
+    goals = goals_storage.get_goals()
+    keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals, goals_keyboard.current_page + 1)
+    await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data == "goals_prev_page")
+async def prev_page(callback: CallbackQuery, state: FSMContext):
+    """Show the previous page of goals."""
+    goals = goals_storage.get_goals()
+    keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals, goals_keyboard.current_page - 1)
+    await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("toggle_goal:"))
-async def toggle_goal_status(callback: CallbackQuery, state: FSMContext):
+async def toggle_goal(callback: CallbackQuery, state: FSMContext):
+    """Toggle the completion status of a goal."""
     try:
-        goal_id = int(callback.data.split(":")[1])
-        goals = load_goals()
+        goal_idx = int(callback.data.split(":")[1])
+        goals = goals_storage.get_goals()
         
-        if 0 <= goal_id < len(goals):
-            goals[goal_id]["completed"] = not goals[goal_id].get("completed", False)
-            if goals[goal_id]["completed"]:
-                goals[goal_id]["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                goals[goal_id].pop("completed_at", None)
+        if not 0 <= goal_idx < len(goals):
+            await callback.answer("Ошибка: цель не найдена", show_alert=True)
+            return
             
-            # Сохраняем обновленный список целей
-            save_goals(goals)
-            
-            text = "🎯 Ваши цели:\n\n"
-            for i, goal in enumerate(goals, 1):
-                text += format_goal_text(goal, i) + "\n"
-            
-            keyboard = generate_goals_keyboard(goals)
-            await callback.message.edit_text(text=text, reply_markup=keyboard)
-            await callback.answer("✅ Статус цели обновлён")
+        goals[goal_idx]["completed"] = not goals[goal_idx].get("completed", False)
+        goals_storage.save_data(goals)
+        
+        keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
+        await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+        await callback.answer()
     except Exception as e:
-        await callback.answer("❌ Произошла ошибка: " + str(e), show_alert=True)
+        logger.error(f"Error in toggle_goal: {str(e)}")
+        await callback.answer("Произошла ошибка при изменении статуса цели", show_alert=True)
 
 @router.callback_query(F.data.startswith("delete_goal:"))
 async def delete_goal(callback: CallbackQuery, state: FSMContext):
+    """Delete a goal."""
     try:
-        goal_id = int(callback.data.split(":")[1])
-        goals = load_goals()
+        goal_idx = int(callback.data.split(":")[1])
+        goals = goals_storage.get_goals()
         
-        if 0 <= goal_id < len(goals):
-            deleted_goal = goals.pop(goal_id)
-            # Сохраняем обновленный список целей
-            save_goals(goals)
-            
-            text = "🎯 Ваши цели:\n\n" if goals else "У вас пока нет целей. Добавьте новую цель!"
-            if goals:
-                for i, goal in enumerate(goals, 1):
-                    text += format_goal_text(goal, i) + "\n"
-            
-            keyboard = generate_goals_keyboard(goals)
-            await callback.message.edit_text(text=text, reply_markup=keyboard)
-            await callback.answer("🗑 Цель удалена")
-    except Exception as e:
-        await callback.answer("❌ Произошла ошибка: " + str(e), show_alert=True)
-
-@router.message(AddGoal.waiting_for_goal_text)
-async def receive_goal_text(message: Message, state: FSMContext):
-    try:
-        print("Receiving goal text...")
-        
-        if not isinstance(message.text, str):
-            print(f"Invalid text type: {type(message.text)}")
-            await message.answer("❌ Ошибка: текст цели должен быть строкой")
+        if not 0 <= goal_idx < len(goals):
+            await callback.answer("Ошибка: цель не найдена", show_alert=True)
             return
             
-        text = message.text.strip()
-        if not text:
-            await message.answer("❌ Текст цели не может быть пустым")
+        del goals[goal_idx]
+        goals_storage.save_data(goals)
+        
+        keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
+        await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+        await callback.answer("Цель удалена")
+    except Exception as e:
+        logger.error(f"Error in delete_goal: {str(e)}")
+        await callback.answer("Произошла ошибка при удалении цели", show_alert=True)
+
+@router.callback_query(F.data.startswith("edit_goal:"))
+async def start_edit_goal(callback: CallbackQuery, state: FSMContext):
+    """Start editing a goal."""
+    try:
+        goal_idx = int(callback.data.split(":")[1])
+        goals = goals_storage.get_goals()
+        
+        if not 0 <= goal_idx < len(goals):
+            await callback.answer("Ошибка: цель не найдена", show_alert=True)
             return
             
-        print(f"Saving goal text: {text}")
+        await state.update_data(editing_goal_idx=goal_idx)
         
-        # Сохраняем текст цели в состоянии
-        await state.update_data(goal_text=text)
-        
-        # Показываем клавиатуру с выбором приоритета
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"{PRIORITY_ICONS['high']} Высокий", callback_data="priority:high")],
-            [InlineKeyboardButton(text=f"{PRIORITY_ICONS['medium']} Средний", callback_data="priority:medium")],
-            [InlineKeyboardButton(text=f"{PRIORITY_ICONS['low']} Низкий", callback_data="priority:low")]
-        ])
-        
-        await message.answer("Выберите приоритет цели:", reply_markup=keyboard)
-        await state.set_state(AddGoal.waiting_for_priority)
-        
-    except Exception as e:
-        print(f"Error in receive_goal_text: {str(e)}")
-        await message.answer("❌ Произошла ошибка при сохранении текста цели: " + str(e))
-        await state.clear()
-
-@router.callback_query(AddGoal.waiting_for_priority)
-async def receive_priority(callback: CallbackQuery, state: FSMContext):
-    try:
-        print("Receiving priority...")
-        priority = callback.data.split(":")[1]
-        print(f"Priority value: {priority}")
-        
-        # Сохраняем приоритет в состоянии
-        current_data = await state.get_data()
-        await state.update_data(
-            goal_text=current_data.get("goal_text"),
-            priority=priority
-        )
-        
-        # Показываем клавиатуру с выбором дедлайна
-        today = datetime.now().date()
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text=f"{TIME_ICONS['deadline']} Сегодня", 
-                                   callback_data=f"deadline:{today.strftime('%Y-%m-%d')}"),
-                InlineKeyboardButton(text=f"{TIME_ICONS['deadline']} Завтра", 
-                                   callback_data=f"deadline:{(today + timedelta(days=1)).strftime('%Y-%m-%d')}")
+                InlineKeyboardButton(text="✏️ Изменить текст", callback_data=f"edit_goal_text:{goal_idx}"),
+                InlineKeyboardButton(text="🎯 Изменить приоритет", callback_data=f"edit_goal_priority:{goal_idx}")
             ],
             [
-                InlineKeyboardButton(text=f"{TIME_ICONS['deadline']} Через неделю", 
-                                   callback_data=f"deadline:{(today + timedelta(weeks=1)).strftime('%Y-%m-%d')}")
-            ],
-            [
-                InlineKeyboardButton(text=f"{TIME_ICONS['calendar']} Без дедлайна", 
-                                   callback_data="deadline:none")
+                InlineKeyboardButton(text="⏰ Изменить срок", callback_data=f"edit_goal_deadline:{goal_idx}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="show_goals")
             ]
         ])
         
-        await callback.message.edit_text("Выберите дедлайн для цели:", reply_markup=keyboard)
-        await state.set_state(AddGoal.waiting_for_deadline)
+        await callback.message.edit_text(
+            text=f"Редактирование цели:\n{goals[goal_idx]['text']}",
+            reply_markup=keyboard
+        )
         await callback.answer()
-        
     except Exception as e:
-        print(f"Error in receive_priority: {str(e)}")
-        await callback.answer("❌ Произошла ошибка при сохранении приоритета: " + str(e), show_alert=True)
+        logger.error(f"Error in start_edit_goal: {str(e)}")
+        await callback.answer("Произошла ошибка при начале редактирования", show_alert=True)
+
+@router.callback_query(F.data.startswith("edit_goal_text:"))
+async def start_edit_goal_text(callback: CallbackQuery, state: FSMContext):
+    """Start editing goal text."""
+    goal_idx = int(callback.data.split(":")[1])
+    await state.set_state(GoalStates.editing_text)
+    await state.update_data(editing_goal_idx=goal_idx)
+    await callback.message.edit_text("Введите новый текст цели:")
+    await callback.answer()
+
+@router.message(GoalStates.editing_text)
+async def receive_edited_text(message: Message, state: FSMContext):
+    """Handle edited goal text."""
+    data = await state.get_data()
+    goal_idx = data["editing_goal_idx"]
+    goals = goals_storage.get_goals()
+    
+    goals[goal_idx]["text"] = message.text
+    goals_storage.save_data(goals)
+    
+    keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals, goals_keyboard.current_page)
+    await message.answer(text=message_text, reply_markup=keyboard)
+    await state.clear()
+
+@router.callback_query(F.data.startswith("edit_goal_priority:"))
+async def start_edit_goal_priority(callback: CallbackQuery, state: FSMContext):
+    """Start editing goal priority."""
+    goal_idx = int(callback.data.split(":")[1])
+    await state.set_state(GoalStates.editing_priority)
+    await state.update_data(editing_goal_idx=goal_idx)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=f"{PRIORITY_ICONS['high']} Высокий", callback_data=f"priority:high"),
+            InlineKeyboardButton(text=f"{PRIORITY_ICONS['medium']} Средний", callback_data=f"priority:medium"),
+            InlineKeyboardButton(text=f"{PRIORITY_ICONS['low']} Низкий", callback_data=f"priority:low")
+        ]
+    ])
+    
+    await callback.message.edit_text("Выберите новый приоритет:", reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(GoalStates.editing_priority)
+async def receive_edited_priority(callback: CallbackQuery, state: FSMContext):
+    """Handle edited goal priority."""
+    data = await state.get_data()
+    goal_idx = data["editing_goal_idx"]
+    priority = callback.data.split(":")[1]
+    
+    goals = goals_storage.get_goals()
+    goals[goal_idx]["priority"] = priority
+    goals_storage.save_data(goals)
+    
+    keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals, goals_keyboard.current_page)
+    await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+    await state.clear()
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("edit_goal_deadline:"))
+async def start_edit_goal_deadline(callback: CallbackQuery, state: FSMContext):
+    """Start editing goal deadline."""
+    try:
+        goal_idx = int(callback.data.split(":")[1])
+        await state.set_state(GoalStates.editing_deadline)
+        await state.update_data(editing_goal_idx=goal_idx)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text=f"{TIME_ICONS['clock']} Сегодня", callback_data=f"edit_deadline:{goal_idx}:{datetime.now().strftime('%Y-%m-%d')}"),
+                InlineKeyboardButton(text=f"{TIME_ICONS['clock']} Завтра", callback_data=f"edit_deadline:{goal_idx}:{(datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')}")
+            ],
+            [
+                InlineKeyboardButton(text=f"{TIME_ICONS['calendar']} Неделя", callback_data=f"edit_deadline:{goal_idx}:{(datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')}"),
+                InlineKeyboardButton(text=f"{TIME_ICONS['calendar']} Месяц", callback_data=f"edit_deadline:{goal_idx}:{(datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')}")
+            ],
+            [
+                InlineKeyboardButton(text="Без срока", callback_data=f"edit_deadline:{goal_idx}:none")
+            ]
+        ])
+        
+        await callback.message.edit_text("Выберите новый срок:", reply_markup=keyboard)
+        await callback.answer()
+    except Exception as e:
+        await callback.answer(f"Ошибка: {str(e)}", show_alert=True)
         await state.clear()
 
-@router.callback_query(AddGoal.waiting_for_deadline)
-async def receive_deadline(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("edit_deadline:"))
+async def receive_edited_deadline(callback: CallbackQuery, state: FSMContext):
+    """Handle edited goal deadline."""
     try:
-        print(f"Receiving deadline: {callback.data}")
-        deadline = None
-        if callback.data.startswith("deadline:"):
-            deadline = callback.data.split(":", 1)[1]
-            if deadline == "none":
-                deadline = None
-                
-        print(f"Deadline value: {deadline}")
-        
-        # Получаем сохраненные данные
-        data = await state.get_data()
-        print(f"State data: {data}")
-        
-        # Загружаем текущие цели
-        goals = load_goals()
-        goal_text = data.get("goal_text")
-        priority = data.get("priority")
-        
-        if not isinstance(goal_text, str):
-            raise ValueError("Текст цели должен быть строкой")
-            
-        # Создаем новую цель
-        new_goal = {
-            "text": goal_text,
-            "priority": priority,
-            "deadline": deadline,
-            "completed": False,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
-        print(f"New goal: {new_goal}")
-        # Добавляем новую цель к существующим
-        goals.append(new_goal)
-        
-        # Сохраняем обновленный список целей
-        save_goals(goals)
-        
-        # Формируем текст сообщения
-        text = "🎯 Ваши цели:\n\n"
-        for i, goal in enumerate(goals, 1):
-            text += format_goal_text(goal, i) + "\n"
-        
-        # Создаем новую клавиатуру
-        keyboard = generate_goals_keyboard(goals)
-        
-        # Отправляем новое сообщение со списком целей
-        await callback.message.answer(text=text, reply_markup=keyboard)
-        await callback.message.delete()
-        await callback.answer("✅ Цель добавлена")
-        await state.clear()
-        
-    except Exception as e:
-        print(f"Error in receive_deadline: {str(e)}")
-        await callback.answer("❌ Произошла ошибка: " + str(e), show_alert=True)
-        await state.clear()
-
-@router.callback_query(F.data.startswith("sort_goals:"))
-async def handle_sort_goals(callback: CallbackQuery, state: FSMContext):
-    try:
-        action = callback.data.split(":")[1]
-        data = await state.get_data()
-        goals = data.get("goals", [])
-        
-        if not goals:
-            await callback.answer("Нет целей для сортировки")
+        parts = callback.data.split(":")
+        if len(parts) < 3:
+            await callback.answer("Ошибка: неверный формат данных", show_alert=True)
+            await state.clear()
             return
             
-        if action == "show":
-            keyboard = generate_goals_keyboard(goals, show_sort=True)
-            await callback.message.edit_reply_markup(reply_markup=keyboard)
-        elif action == "hide":
-            keyboard = generate_goals_keyboard(goals, show_sort=False)
-            await callback.message.edit_reply_markup(reply_markup=keyboard)
-        else:
-            # Сортировка по разным параметрам
-            if action == "priority":
-                priority_order = {"high": 0, "medium": 1, "low": 2}
-                goals.sort(key=lambda x: priority_order.get(x.get("priority", "medium"), 1))
-            elif action == "status":
-                goals.sort(key=lambda x: x.get("completed", False))
-            elif action == "deadline":
-                goals.sort(key=lambda x: x.get("deadline", "9999-12-31"))
-            elif action == "date":
-                goals.sort(key=lambda x: x.get("created_at", ""))
-            elif action == "reverse":
-                goals.reverse()
-            
-            await state.update_data(goals=goals)
-            keyboard = generate_goals_keyboard(goals, show_sort=True)
-            text = "🎯 Ваши цели:\n\n"
-            
-            for i, goal in enumerate(goals, 1):
-                text += format_goal_text(goal, i) + "\n"
-            
-            await callback.message.edit_text(text=text, reply_markup=keyboard)
+        goal_idx = int(parts[1])
+        deadline = parts[2]
         
+        goals = goals_storage.get_goals()
+        if not 0 <= goal_idx < len(goals):
+            await callback.answer("Ошибка: цель не найдена", show_alert=True)
+            await state.clear()
+            return
+            
+        goals[goal_idx]["deadline"] = None if deadline == "none" else deadline
+        goals_storage.save_data(goals)
+        
+        keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
+        await callback.message.edit_text(text=message_text, reply_markup=keyboard)
+        await state.clear()
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in receive_edited_deadline: {str(e)}")
+        await callback.answer(f"Произошла ошибка: {str(e)}", show_alert=True)
+        await state.clear()
+
+@router.callback_query(GoalStates.waiting_for_deadline)
+async def receive_deadline(callback: CallbackQuery, state: FSMContext):
+    """Handle deadline selection for a new goal."""
+    try:
+        parts = callback.data.split(":")
+        if len(parts) < 2:
+            await callback.answer("Ошибка: неверный формат данных", show_alert=True)
+            await state.clear()
+            return
+            
+        deadline = parts[1]
+        state_data = await state.get_data()
+        
+        if not state_data.get("text"):
+            await callback.answer("Ошибка: текст цели не найден", show_alert=True)
+            await state.clear()
+            return
+            
+        if not state_data.get("priority"):
+            await callback.answer("Ошибка: приоритет не выбран", show_alert=True)
+            await state.clear()
+            return
+        
+        # Add the goal using storage method
+        try:
+            goals_storage.add_goal(
+                text=state_data["text"],
+                priority=state_data["priority"],
+                deadline=None if deadline == "none" else deadline
+            )
+            
+            # Get updated goals list and generate keyboard
+            goals = goals_storage.get_goals()
+            keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
+            
+            # Delete old message and send new one
+            await callback.message.delete()
+            await callback.message.answer(message_text, reply_markup=keyboard)
+            
+        except Exception as e:
+            logger.error(f"Error in receive_deadline: {str(e)}")
+            await callback.answer(f"Ошибка при сохранении цели: {str(e)}", show_alert=True)
+        
+        await state.clear()
+        
+    except Exception as e:
+        logger.error(f"Error in receive_deadline: {str(e)}")
+        await callback.answer(f"Произошла ошибка: {str(e)}", show_alert=True)
+        await state.clear()
+        return
+
+@router.callback_query(F.data == "goals_sort")
+async def show_sort_options(callback: CallbackQuery):
+    """Show goal sorting options."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="По приоритету", callback_data="sort:priority"),
+            InlineKeyboardButton(text="По сроку", callback_data="sort:deadline")
+        ],
+        [
+            InlineKeyboardButton(text="По статусу", callback_data="sort:status"),
+            InlineKeyboardButton(text="По умолчанию", callback_data="sort:default")
+        ]
+    ])
+    await callback.message.edit_text("Выберите способ сортировки:", reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("goals_sort:"))
+async def sort_goals(callback: CallbackQuery):
+    """Sort goals based on selected criteria."""
+    try:
+        sort_type = callback.data.split(":")[1]
+        goals = goals_storage.get_goals()
+        
+        if sort_type == "priority":
+            priority_order = {"high": 0, "medium": 1, "low": 2}
+            goals.sort(key=lambda x: priority_order.get(x.get("priority", "medium"), 1))
+        elif sort_type == "deadline":
+            goals.sort(key=lambda x: x.get("deadline") or "9999-12-31")
+        elif sort_type == "status":
+            goals.sort(key=lambda x: not x.get("completed", False))
+        elif sort_type == "date":
+            goals.sort(key=lambda x: x.get("created_at") or "")
+        
+        goals_storage.save_data(goals)
+        keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
+        await callback.message.edit_text(text=message_text, reply_markup=keyboard)
         await callback.answer()
     except Exception as e:
-        await callback.answer(f"{STATUS_ICONS['error']} Произошла ошибка: {str(e)}", show_alert=True)
+        logger.error(f"Error in sort_goals: {str(e)}")
+        await callback.answer("Произошла ошибка при сортировке целей", show_alert=True)
 
 async def send_goals_report(bot: Bot):
-    """Отправляет еженедельный отчет по целям."""
-    # В реальном приложении здесь нужно:
-    # 1. Получить список пользователей
-    # 2. Для каждого пользователя получить его цели
-    # 3. Сформировать отчет по достигнутым и текущим целям
-    # 4. Отправить персонализированный отчет
-    # await bot.send_message(
-    #     chat_id=user_id,
-    #     text="🎯 Еженедельный отчет по целям:\n\n"
-    #          "✅ Достигнуто: X целей\n"
-    #          "⏳ В процессе: Y целей\n"
-    #          "❌ Просрочено: Z целей"
-    # )
-    pass
+    """Send weekly goals report."""
+    goals = goals_storage.get_goals()
+    completed = [g for g in goals if g.get("completed", False)]
+    active = [g for g in goals if not g.get("completed", False)]
+    overdue = [g for g in active if g.get("deadline") and datetime.strptime(g["deadline"], "%Y-%m-%d").date() < datetime.now().date()]
+    
+    text = "🎯 Еженедельный отчет по целям:\n\n"
+    text += f"✅ Достигнуто: {len(completed)} целей\n"
+    text += f"⏳ В процессе: {len(active)} целей\n"
+    text += f"❌ Просрочено: {len(overdue)} целей\n\n"
+    
+    if overdue:
+        text += "Просроченные цели:\n"
+        for goal in overdue:
+            text += f"• {goal['text']} ({goal.get('priority', 'средний')})\n"
+    
+    await bot.send_message(USER_ID, text)
+
+@router.callback_query(F.data == "add_goal")
+async def start_add_goal(callback: CallbackQuery, state: FSMContext):
+    """Start the process of adding a new goal."""
+    await state.set_state(GoalStates.waiting_for_text)
+    await callback.message.answer("Введите текст цели:")
+    await callback.answer()
+
+@router.message(GoalStates.waiting_for_text)
+async def receive_goal_text(message: Message, state: FSMContext):
+    """Handle the text input for a new goal."""
+    await state.update_data(text=message.text)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=f"{PRIORITY_ICONS['high']} Высокий", callback_data="priority:high"),
+            InlineKeyboardButton(text=f"{PRIORITY_ICONS['medium']} Средний", callback_data="priority:medium"),
+            InlineKeyboardButton(text=f"{PRIORITY_ICONS['low']} Низкий", callback_data="priority:low")
+        ]
+    ])
+    
+    await message.answer("Выберите приоритет:", reply_markup=keyboard)
+    await state.set_state(GoalStates.waiting_for_priority)
+
+@router.callback_query(GoalStates.waiting_for_priority)
+async def receive_priority(callback: CallbackQuery, state: FSMContext):
+    """Handle priority selection for a new goal."""
+    try:
+        parts = callback.data.split(":")
+        if len(parts) < 2:
+            await callback.answer("Ошибка: неверный формат данных", show_alert=True)
+            return
+            
+        priority = parts[1]
+        if priority not in ["high", "medium", "low"]:
+            await callback.answer("Ошибка: неверный приоритет", show_alert=True)
+            return
+            
+        await state.update_data(priority=priority)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text=f"{TIME_ICONS['clock']} Сегодня", callback_data=f"deadline:{datetime.now().strftime('%Y-%m-%d')}"),
+                InlineKeyboardButton(text=f"{TIME_ICONS['clock']} Завтра", callback_data=f"deadline:{(datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')}")
+            ],
+            [
+                InlineKeyboardButton(text=f"{TIME_ICONS['calendar']} Неделя", callback_data=f"deadline:{(datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')}"),
+                InlineKeyboardButton(text=f"{TIME_ICONS['calendar']} Месяц", callback_data=f"deadline:{(datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')}")
+            ],
+            [
+                InlineKeyboardButton(text="Без срока", callback_data="deadline:none")
+            ]
+        ])
+        
+        await callback.message.edit_text("Выберите срок:", reply_markup=keyboard)
+        await state.set_state(GoalStates.waiting_for_deadline)
+        
+    except Exception as e:
+        logger.error(f"Error in receive_priority: {str(e)}")
+        await callback.answer(f"Произошла ошибка: {str(e)}", show_alert=True)
+    await state.clear()

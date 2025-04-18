@@ -39,20 +39,16 @@ async def show_mood(message: Message):
 @router.callback_query(F.data.startswith("mood_"))
 async def process_mood(callback: CallbackQuery):
     try:
-        mood_value = callback.data.split("_")[1]
-        if mood_value not in MOOD_EMOJIS:
+        mood_value = int(callback.data.split("_")[1])  # Convert to integer
+        if mood_value not in range(1, 6):  # Check range 1-5
             await callback.answer("❌ Некорректное значение настроения", show_alert=True)
             return
             
-        # Сохраняем настроение в формате {"value": "5", "timestamp": "2024-03-17 15:40:00"}
-        mood_data = {
-            "value": mood_value,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        mood_storage.add_mood(mood_data)
+        # Сохраняем настроение
+        mood_storage.add_mood(mood_value)
         
         await callback.message.edit_reply_markup()
-        await callback.message.answer(f"Записал ваше настроение: {MOOD_EMOJIS[mood_value]}")
+        await callback.message.answer(f"Записал ваше настроение: {MOOD_EMOJIS[str(mood_value)]}")
         await callback.answer()
         
     except Exception as e:

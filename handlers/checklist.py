@@ -7,6 +7,9 @@ from services.storage import task_storage, ValidationError, StorageError
 from keyboards.checklist import ChecklistKeyboard
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
+from services.config import Config
+from services.checklist_storage import ChecklistStorage
+from log import logger
 
 router = Router()
 checklist_keyboard = ChecklistKeyboard()
@@ -308,15 +311,58 @@ async def handle_sort_tasks(callback: CallbackQuery, state: FSMContext):
 
 async def send_checklist_report(bot: Bot):
     """Отправляет ежедневный отчет по выполненным задачам."""
-    # В реальном приложении здесь нужно:
-    # 1. Получить список пользователей
-    # 2. Для каждого пользователя получить его задачи
-    # 3. Сформировать отчет по выполненным и невыполненным задачам
-    # 4. Отправить персонализированный отчет
-    # await bot.send_message(
-    #     chat_id=user_id,
-    #     text="📋 Отчет по задачам за день:\n\n"
-    #          "✅ Выполнено: X задач\n"
-    #          "⏳ Осталось: Y задач"
-    # )
-    pass
+    try:
+        # Получаем хранилище задач
+        storage = ChecklistStorage()
+        tasks = storage.get_tasks()
+        
+        if not tasks:
+            return  # Нет задач для отчета
+            
+        # Подсчитываем статистику
+        completed_tasks = len([task for task in tasks if task.get('completed', False)])
+        total_tasks = len(tasks)
+        completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+        
+        # Формируем текст отчета
+        report_text = (
+            "📋 Отчет по задачам за день:\n\n"
+            f"✅ Выполнено: {completed_tasks} из {total_tasks} задач\n"
+            f"📊 Процент выполнения: {completion_rate:.1f}%\n\n"
+            "🎯 Детали по задачам:\n"
+        )
+        
+        # Добавляем список задач, сгруппированный по статусу
+        completed_tasks_list = []
+        pending_tasks_list = []
+        
+        for task in tasks:
+            task_text = f"• {task['text']}"
+            if task.get('priority'):
+                priority_icons = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+                task_text += f" {priority_icons.get(task['priority'], '')}"
+            if task.get('deadline'):
+                task_text += f" (до {task['deadline']})"
+                
+            if task.get('completed', False):
+                completed_tasks_list.append(task_text)
+            else:
+                pending_tasks_list.append(task_text)
+        
+        if completed_tasks_list:
+            report_text += "\nВыполненные задачи:\n" + "\n".join(completed_tasks_list)
+        if pending_tasks_list:
+            report_text += "\n\nОжидающие выполнения:\n" + "\n".join(pending_tasks_list)
+            
+        # Получаем ID пользователя из конфига
+        config = Config()
+        user_id = config.get_user_id()
+        
+        # Отправляем отчет
+        await bot.send_message(
+            chat_id=user_id,
+            text=report_text
+        )
+        
+    except Exception as e:
+        logger.error(f"Error sending checklist report: {str(e)}")

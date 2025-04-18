@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass
 from config import CHECKLIST_PATH, GOALS_PATH, SCHEDULE_PATH, MOOD_PATH
@@ -28,8 +28,8 @@ class ValidationRules:
     """Правила валидации для полей"""
     max_text_length: int = 500
     min_text_length: int = 1
-    allowed_priorities: List[str] = ("высокий", "средний", "низкий")
-    
+    allowed_priorities: tuple = ("high", "medium", "low", "высокий", "средний", "низкий")
+
 class BaseStorage:
     """Базовый класс для работы с JSON хранилищем"""
     
@@ -41,31 +41,15 @@ class BaseStorage:
         self.validation_rules = ValidationRules()
     
     def load_data(self) -> List[Dict[str, Any]]:
-        """
-        Загружает данные из JSON файла
-        
-        Returns:
-            List[Dict[str, Any]]: Список элементов
-            
-        Raises:
-            StorageError: При проблемах с загрузкой данных
-        """
+        """Загружает данные из JSON файла"""
         try:
             with open(self.filename, 'r', encoding='utf-8') as f:
-            return json.load(f)
+                return json.load(f)
         except Exception as e:
             raise StorageError(f"Ошибка при загрузке данных: {str(e)}")
     
     def save_data(self, data: List[Dict[str, Any]]) -> None:
-        """
-        Сохраняет данные в JSON файл
-        
-        Args:
-            data: Список элементов для сохранения
-            
-        Raises:
-            StorageError: При проблемах с сохранением данных
-        """
+        """Сохраняет данные в JSON файл"""
         try:
             with open(self.filename, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -97,17 +81,7 @@ class BaseStorage:
                 raise ValidationError("Неверный формат даты. Используйте YYYY-MM-DD")
 
     def sort_items(self, items: List[Dict[str, Any]], sort_by: str = "priority", reverse: bool = False) -> List[Dict[str, Any]]:
-        """
-        Сортирует элементы по заданному критерию
-        
-        Args:
-            items: Список элементов для сортировки
-            sort_by: Критерий сортировки ('priority', 'status', 'date', 'deadline')
-            reverse: Сортировать в обратном порядке
-            
-        Returns:
-            List[Dict[str, Any]]: Отсортированный список
-        """
+        """Сортирует элементы по заданному критерию"""
         priority_order = {"высокий": 3, "средний": 2, "низкий": 1}
         
         if sort_by == "priority":
@@ -119,7 +93,7 @@ class BaseStorage:
         elif sort_by == "status":
             return sorted(
                 items,
-                key=lambda x: (x.get("completed", x.get("done", False)), x.get("completed_at", "")),
+                key=lambda x: (x.get("completed", False), x.get("completed_at", "")),
                 reverse=not reverse
             )
         elif sort_by == "date":
@@ -153,17 +127,7 @@ class TaskStorage(BaseStorage):
         return self.load_data()
     
     def add_task(self, text: str, priority: str = "средний", deadline: Optional[str] = None) -> None:
-        """
-        Добавляет новую задачу
-        
-        Args:
-            text: Текст задачи
-            priority: Приоритет задачи
-            deadline: Дедлайн в формате YYYY-MM-DD
-            
-        Raises:
-            ValidationError: При невалидных данных
-        """
+        """Добавляет новую задачу"""
         self.validate_text(text)
         self.validate_priority(priority)
         self.validate_deadline(deadline)
@@ -208,17 +172,7 @@ class GoalStorage(BaseStorage):
         return self.load_data()
     
     def add_goal(self, text: str, priority: str = "средний", deadline: Optional[str] = None) -> None:
-        """
-        Добавляет новую цель
-        
-        Args:
-            text: Текст цели
-            priority: Приоритет цели
-            deadline: Дедлайн в формате YYYY-MM-DD
-            
-        Raises:
-            ValidationError: При невалидных данных
-        """
+        """Добавляет новую цель"""
         self.validate_text(text)
         self.validate_priority(priority)
         self.validate_deadline(deadline)
@@ -262,38 +216,30 @@ class MoodStorage(BaseStorage):
         """Получает список всех записей о настроении"""
         return self.load_data()
     
-    def add_mood(self, mood_data: Dict[str, Any]) -> None:
-        """
-        Добавляет новую запись о настроении
+    def add_mood(self, value: int, comment: str = "") -> None:
+        """Добавляет новую запись о настроении"""
+        if not isinstance(value, (int, float)) or not 1 <= value <= 5:
+            raise ValidationError("Значение настроения должно быть числом от 1 до 5")
         
-        Args:
-            mood_data: Данные о настроении
-            
-        Raises:
-            ValidationError: При невалидных данных
-        """
-        try:
-            moods = self.get_moods()
-            # Проверяем, что значение настроения является строкой и содержит число от 1 до 5
-            value = str(mood_data.get('value', ''))
-            if not value.isdigit() or int(value) < 1 or int(value) > 5:
-                raise ValidationError("Значение настроения должно быть числом от 1 до 5")
-            
-            moods.append({
-                'value': value,
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            })
-            self.save_data(moods)
-        except Exception as e:
-            raise StorageError(f"Ошибка при сохранении настроения: {str(e)}")
+        if comment:
+            self.validate_text(comment)
+        
+        moods = self.get_moods()
+        moods.append({
+            "value": value,
+            "comment": comment.strip(),
+            "timestamp": datetime.now().isoformat()
+        })
+        self.save_data(moods)
     
-    def get_recent_moods(self, limit: int = 7) -> List[Dict[str, Any]]:
-        """Получает последние записи о настроении"""
-        try:
-            moods = self.get_moods()
-            return sorted(moods, key=lambda x: x['timestamp'], reverse=True)[:limit]
-        except Exception as e:
-            raise StorageError(f"Ошибка при получении истории настроений: {str(e)}")
+    def get_recent_moods(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Получает записи о настроении за последние n дней"""
+        moods = self.get_moods()
+        cutoff = datetime.now() - timedelta(days=days)
+        return [
+            mood for mood in moods
+            if datetime.fromisoformat(mood["timestamp"]) > cutoff
+        ]
 
 class ScheduleStorage(BaseStorage):
     """Класс для работы с расписанием"""
@@ -302,61 +248,57 @@ class ScheduleStorage(BaseStorage):
         super().__init__(SCHEDULE_PATH)
     
     def get_schedule(self) -> List[Dict[str, Any]]:
-        """Получает список всех пунктов расписания"""
+        """Получает список всех записей расписания"""
         return self.load_data()
     
+    def get_sorted_schedule(self) -> List[Dict[str, Any]]:
+        """Получает отсортированный по времени список записей расписания"""
+        schedule = self.get_schedule()
+        return sorted(schedule, key=lambda x: datetime.strptime(x.get("time", "00:00"), "%H:%M"))
+    
     def add_entry(self, time: str, text: str) -> None:
-        """
-        Добавляет новый пункт в расписание
-        
-        Args:
-            time: Время в формате ЧЧ:ММ
-            text: Текст пункта расписания
-            
-        Raises:
-            ValidationError: При невалидных данных
-        """
+        """Добавляет новую запись в расписание"""
         if not self.validate_time_format(time):
-            raise ValidationError("Неверный формат времени")
-        if not text.strip():
-            raise ValidationError("Текст не может быть пустым")
+            raise ValidationError("Неверный формат времени. Используйте HH:MM")
+        
+        self.validate_text(text)
         
         schedule = self.get_schedule()
         schedule.append({
             "time": time,
-            "text": text.strip()
+            "text": text.strip(),
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         })
-        self.save_data(sorted(schedule, key=lambda x: x["time"]))
+        self.save_data(schedule)
     
     def update_entry_text(self, index: int, new_text: str) -> None:
-        """Обновляет текст пункта расписания"""
-        if not new_text.strip():
-            raise ValidationError("Текст не может быть пустым")
-        
+        """Обновляет текст записи в расписании"""
+        self.validate_text(new_text)
         schedule = self.get_schedule()
+        
         if not 0 <= index < len(schedule):
-            raise ValidationError("Неверный индекс")
+            raise ValidationError("Неверный индекс записи")
         
         schedule[index]["text"] = new_text.strip()
         self.save_data(schedule)
     
     def update_entry_time(self, index: int, new_time: str) -> None:
-        """Обновляет время пункта расписания"""
+        """Обновляет время записи в расписании"""
         if not self.validate_time_format(new_time):
-            raise ValidationError("Неверный формат времени")
+            raise ValidationError("Неверный формат времени. Используйте HH:MM")
         
         schedule = self.get_schedule()
         if not 0 <= index < len(schedule):
-            raise ValidationError("Неверный индекс")
+            raise ValidationError("Неверный индекс записи")
         
         schedule[index]["time"] = new_time
-        self.save_data(sorted(schedule, key=lambda x: x["time"]))
+        self.save_data(schedule)
     
     def delete_entry(self, index: int) -> Dict[str, Any]:
-        """Удаляет пункт расписания"""
+        """Удаляет запись из расписания и возвращает удаленную запись"""
         schedule = self.get_schedule()
         if not 0 <= index < len(schedule):
-            raise ValidationError("Неверный индекс")
+            raise ValidationError("Неверный индекс записи")
         
         deleted = schedule.pop(index)
         self.save_data(schedule)
@@ -364,16 +306,14 @@ class ScheduleStorage(BaseStorage):
     
     @staticmethod
     def validate_time_format(time: str) -> bool:
-        """Проверяет формат времени (ЧЧ:ММ)"""
-        pattern = r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$'
-        return bool(re.match(pattern, time))
-    
-    def get_sorted_schedule(self) -> List[Dict[str, Any]]:
-        """Получает отсортированный по времени список пунктов расписания"""
-        schedule = self.get_schedule()
-        return sorted(schedule, key=lambda x: datetime.strptime(x.get("time", "00:00"), "%H:%M"))
+        """Проверяет формат времени"""
+        try:
+            datetime.strptime(time, "%H:%M")
+            return True
+        except ValueError:
+            return False
 
-# Создаем глобальные экземпляры для использования
+# Инициализация хранилищ
 task_storage = TaskStorage()
 goal_storage = GoalStorage()
 mood_storage = MoodStorage()

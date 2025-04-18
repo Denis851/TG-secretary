@@ -8,10 +8,10 @@ from services.quote import send_quote
 
 tz = timezone("Europe/Moscow")  # Или твой часовой пояс
 
-scheduler = AsyncIOScheduler(timezone=tz)
-
-def setup_jobs(bot: Bot):
-    """Setup all scheduled jobs"""
+def setup_jobs(bot: Bot) -> AsyncIOScheduler:
+    """Setup all scheduled jobs and return the scheduler instance"""
+    scheduler = AsyncIOScheduler(timezone=tz)
+    
     # Утреннее вдохновение
     scheduler.add_job(send_quote, trigger='cron', hour=6, minute=0, args=[bot])
 
@@ -26,6 +26,9 @@ def setup_jobs(bot: Bot):
     scheduler.add_job(send_goals_report, trigger='cron', day_of_week='sun', hour=21, minute=0, args=[bot])
     scheduler.add_job(analyze_weekly_productivity, trigger='cron', day_of_week='sun', hour=21, minute=15, args=[bot])
 
+    # Запуск планировщика
     scheduler.start()
+    
+    return scheduler
 
 __all__ = ['scheduler', 'setup_jobs']

@@ -1,7 +1,7 @@
 """
 Клавиатуры для работы с целями
 """
-from typing import List, Dict, Any, Union, Tuple
+from typing import List, Dict, Any, Union, Tuple, Optional
 from .base import BaseKeyboard
 from constants.icons import (
     PRIORITY_ICONS,
@@ -16,70 +16,69 @@ from datetime import datetime
 class GoalsKeyboard(BaseKeyboard):
     """Класс для создания клавиатур целей"""
     
-    @classmethod
-    def generate_goals_keyboard(
-        cls,
-        goals: List[Dict[str, Any]],
-        show_sort: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Генерирует клавиатуру для целей
+    def __init__(self):
+        super().__init__()
+        self.goals = []
+        self.current_page = 0
+        self.goals_per_page = 5
+
+    def generate_goals_keyboard(self, goals: List[Dict[str, Any]], page: int = 0) -> Tuple[InlineKeyboardMarkup, str]:
+        """Генерирует клавиатуру для целей и текст сообщения."""
+        goals_per_page = self.goals_per_page
+        total_pages = (len(goals) + goals_per_page - 1) // goals_per_page
+        start_idx = page * goals_per_page
+        end_idx = min(start_idx + goals_per_page, len(goals))
         
-        Args:
-            goals: список целей
-            show_sort: показывать ли кнопки сортировки
-            
-        Returns:
-            Dict с текстом сообщения и разметкой клавиатуры
-        """
-        keyboard = []
-        text = "🎯 Ваши цели:\n\n"
-        
-        # Добавляем кнопки сортировки если нужно
-        if show_sort and goals:
-            keyboard.extend(cls.generate_sort_buttons())
-        elif goals:
-            keyboard.append([{
-                "text": f"{NAVIGATION_ICONS['sort']} Сортировка",
-                "callback_data": "sort_goals:show"
-            }])
+        current_goals = goals[start_idx:end_idx]
+        buttons = []
+        message_lines = ["📋 Ваши цели:"]
         
         # Добавляем цели
-        for i, goal in enumerate(goals, 1):
-            status = "✅" if goal.get("completed") else "⬜️"
-            priority = goal.get("priority", "normal").lower()
-            priority_emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "🟢"
-            goal_text = goal.get("text", "")
-            deadline = cls.format_deadline(goal.get("deadline", ""))
+        for i, goal in enumerate(current_goals, start=start_idx + 1):
+            status = STATUS_ICONS['completed'] if goal.get("completed", False) else STATUS_ICONS['pending']
+            priority = goal.get("priority", "medium")
+            priority_icon = PRIORITY_ICONS.get(priority, "")
+            deadline = goal.get("deadline", "")
+            deadline_text = self.format_deadline(deadline) if deadline else ""
             
-            if goals:
-                text += f"{status} {i}. {goal_text} {priority_emoji} {deadline}\n"
+            goal_text = f"{status} {i}. {goal['text']}"
+            if priority != "medium":
+                goal_text += f" {priority_icon}"
+            if deadline_text:
+                goal_text += f" {deadline_text}"
             
-            # Кнопка с текстом цели
-            keyboard.append([{
-                "text": f"{status} {priority_emoji} {goal_text}",
-                "callback_data": f"goal_toggle:{i-1}"
-            }])
+            message_lines.append(goal_text)
             
-            # Кнопки управления целью
-            keyboard.append([{
-                "text": f"{ACTION_ICONS['edit']}",
-                "callback_data": f"goal_edit:{i-1}"
-            }, {
-                "text": f"{ACTION_ICONS['delete']}",
-                "callback_data": f"goal_delete:{i-1}"
-            }])
+            # Кнопки действий для цели
+            goal_idx = i - 1
+            buttons.append([
+                InlineKeyboardButton(
+                    text=goal_text[:30] + "..." if len(goal_text) > 30 else goal_text,
+                    callback_data=f"toggle_goal:{goal_idx}"
+                )
+            ])
+            buttons.append([
+                InlineKeyboardButton(text=f"{ACTION_ICONS['edit']}", callback_data=f"edit_goal:{goal_idx}"),
+                InlineKeyboardButton(text=f"{ACTION_ICONS['delete']}", callback_data=f"delete_goal:{goal_idx}")
+            ])
         
-        # Добавляем кнопку добавления
-        keyboard.append([{
-            "text": f"{ACTION_ICONS['add']} Добавить цель",
-            "callback_data": "goal_add"
-        }])
+        # Добавляем навигацию
+        if total_pages > 1:
+            nav_buttons = []
+            if page > 0:
+                nav_buttons.append(InlineKeyboardButton(text=NAVIGATION_ICONS['prev'], callback_data="goals_prev_page"))
+            nav_buttons.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="ignore"))
+            if page < total_pages - 1:
+                nav_buttons.append(InlineKeyboardButton(text=NAVIGATION_ICONS['next'], callback_data="goals_next_page"))
+            buttons.append(nav_buttons)
         
-        return {
-            "text": text,
-            "reply_markup": cls.create_inline_keyboard(keyboard)
-        }
+        # Кнопка добавления цели
+        buttons.append([InlineKeyboardButton(text=f"{ACTION_ICONS['add']} Добавить цель", callback_data="add_goal")])
+        
+        if not goals:
+            message_lines.append("\nУ вас пока нет целей. Нажмите кнопку «Добавить цель», чтобы создать новую.")
+        
+        return InlineKeyboardMarkup(inline_keyboard=buttons), "\n".join(message_lines)
     
     @classmethod
     def generate_sort_buttons(cls) -> List[List[Dict[str, str]]]:
