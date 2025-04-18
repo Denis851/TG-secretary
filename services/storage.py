@@ -121,6 +121,7 @@ class TaskStorage(BaseStorage):
     
     def __init__(self):
         super().__init__(CHECKLIST_PATH)
+        self.validation_rules.allowed_priorities = ("высокий", "средний", "низкий")
     
     def get_tasks(self) -> List[Dict[str, Any]]:
         """Получает список всех задач"""
@@ -138,7 +139,8 @@ class TaskStorage(BaseStorage):
             "priority": priority,
             "deadline": deadline,
             "completed": False,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "type": "task"  # Добавляем тип для различения
         })
         self.save_data(tasks)
     
@@ -166,6 +168,7 @@ class GoalStorage(BaseStorage):
     
     def __init__(self):
         super().__init__(GOALS_PATH)
+        self.validation_rules.allowed_priorities = ("высокий", "средний", "низкий")
     
     def get_goals(self) -> List[Dict[str, Any]]:
         """Получает список всех целей"""
@@ -183,7 +186,10 @@ class GoalStorage(BaseStorage):
             "priority": priority,
             "deadline": deadline,
             "completed": False,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "type": "goal",  # Добавляем тип для различения
+            "progress": 0,  # Добавляем прогресс для целей
+            "subtasks": []  # Добавляем подзадачи для целей
         })
         self.save_data(goals)
     
