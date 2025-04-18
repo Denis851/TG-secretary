@@ -379,7 +379,7 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             return
             
-        deadline = parts[1]
+        deadline_type = parts[1]
         state_data = await state.get_data()
         
         if not state_data.get("text"):
@@ -392,21 +392,35 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             return
         
+        # Определяем дату дедлайна
+        deadline = None
+        today = datetime.now().date()
+        
+        if deadline_type == "today":
+            deadline = today.strftime("%Y-%m-%d")
+        elif deadline_type == "tomorrow":
+            deadline = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        elif deadline_type == "week":
+            deadline = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+        
         # Add the goal using storage method
         try:
             goals_storage.add_goal(
                 text=state_data["text"],
                 priority=state_data["priority"],
-                deadline=None if deadline == "none" else deadline
+                deadline=deadline
             )
             
             # Get updated goals list and generate keyboard
             goals = goals_storage.get_goals()
-            keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
+            keyboard = generate_goals_keyboard(goals)
             
-            # Delete old message and send new one
-            await callback.message.delete()
-            await callback.message.answer(message_text, reply_markup=keyboard)
+            # Update message with new goals list
+            await callback.message.edit_text(
+                text="🎯 Ваши цели:",
+                reply_markup=keyboard
+            )
+            await callback.answer("✅ Цель добавлена")
             
         except Exception as e:
             logger.error(f"Error in receive_deadline: {str(e)}")
@@ -418,7 +432,6 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error in receive_deadline: {str(e)}")
         await callback.answer(f"Произошла ошибка: {str(e)}", show_alert=True)
         await state.clear()
-        return
 
 @router.callback_query(F.data == "goals_sort")
 async def show_sort_options(callback: CallbackQuery):
@@ -526,24 +539,30 @@ async def receive_priority(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Ошибка: текст цели не найден", show_alert=True)
             await state.clear()
             return
-            
-        # Добавляем цель с выбранным приоритетом
-        goals_storage.add_goal(
-            text=text,
-            priority=priority
-        )
         
-        goals = goals_storage.get_goals()
-        keyboard = generate_goals_keyboard(goals)
+        # Сохраняем приоритет в состоянии
+        await state.update_data(priority=priority)
+        
+        # Создаем клавиатуру для выбора дедлайна
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Сегодня", callback_data="deadline:today"),
+                InlineKeyboardButton(text="Завтра", callback_data="deadline:tomorrow")
+            ],
+            [
+                InlineKeyboardButton(text="Через неделю", callback_data="deadline:week"),
+                InlineKeyboardButton(text="Без дедлайна", callback_data="deadline:none")
+            ]
+        ])
         
         await callback.message.edit_text(
-            text="🎯 Ваши цели:",
+            text="Выберите срок выполнения:",
             reply_markup=keyboard
         )
-        await callback.answer("✅ Цель добавлена")
-        await state.clear()
+        await state.set_state(GoalStates.waiting_for_deadline)
+        await callback.answer()
         
     except Exception as e:
         logger.error(f"Error in receive_priority: {str(e)}")
-        await callback.answer("❌ Произошла ошибка при сохранении цели", show_alert=True)
+        await callback.answer("❌ Произошла ошибка при сохранении приоритета", show_alert=True)
         await state.clear()
