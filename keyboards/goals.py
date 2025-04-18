@@ -53,23 +53,24 @@ class GoalsKeyboard(BaseKeyboard):
             # Кнопки действий для цели
             goal_idx = i - 1
             
-            # Формируем текст для кнопки, сохраняя важную информацию
-            button_text = f"{status} {goal['text']}"
-            if priority != "medium":
-                button_text += f" {priority_icon}"
-            
             # Добавляем кнопку с полным текстом цели
             buttons.append([
                 InlineKeyboardButton(
-                    text=button_text,
+                    text=f"{status} {goal['text']} {priority_icon if priority != 'medium' else ''}",
                     callback_data=f"toggle_goal:{goal_idx}"
+                ),
+                InlineKeyboardButton(
+                    text=ACTION_ICONS['delete'],
+                    callback_data=f"delete_goal:{goal_idx}"
                 )
             ])
             
             # Кнопки управления
             buttons.append([
-                InlineKeyboardButton(text=f"{ACTION_ICONS['edit']}", callback_data=f"edit_goal:{goal_idx}"),
-                InlineKeyboardButton(text=f"{ACTION_ICONS['delete']}", callback_data=f"delete_goal:{goal_idx}")
+                InlineKeyboardButton(
+                    text=ACTION_ICONS['edit'],
+                    callback_data=f"edit_goal:{goal_idx}"
+                )
             ])
         
         # Добавляем навигацию
