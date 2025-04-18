@@ -6,6 +6,10 @@ import json
 from datetime import datetime, timedelta
 import os
 from pathlib import Path
+import urllib.request
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure required directories exist
 def ensure_directories():
@@ -14,8 +18,22 @@ def ensure_directories():
     for directory in directories:
         Path(directory).mkdir(exist_ok=True)
 
-# Create directories
+def download_font():
+    """Download DejaVu Sans font if it doesn't exist."""
+    font_path = Path('fonts/DejaVuSans.ttf')
+    if not font_path.exists():
+        logger.info("Downloading DejaVu Sans font...")
+        font_url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
+        try:
+            urllib.request.urlretrieve(font_url, font_path)
+            logger.info("Font downloaded successfully")
+        except Exception as e:
+            logger.error(f"Error downloading font: {e}")
+            raise
+
+# Create directories and download font
 ensure_directories()
+download_font()
 
 # Register DejaVu Sans font
 font_path = Path('fonts/DejaVuSans.ttf')

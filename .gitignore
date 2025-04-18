@@ -30,5 +30,5 @@ __pycache__/
 # Project specific
 data/*.json
 reports/*.pdf
-fonts/*.ttf
+# fonts/*.ttf  # Разрешаем хранение шрифтов в репозитории
 
