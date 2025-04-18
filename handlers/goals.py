@@ -376,7 +376,6 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
         parts = callback.data.split(":")
         if len(parts) < 2:
             await callback.answer("Ошибка: неверный формат данных", show_alert=True)
-            await state.clear()
             return
             
         deadline_type = parts[1]
@@ -384,12 +383,10 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
         
         if not state_data.get("text"):
             await callback.answer("Ошибка: текст цели не найден", show_alert=True)
-            await state.clear()
             return
             
         if not state_data.get("priority"):
             await callback.answer("Ошибка: приоритет не выбран", show_alert=True)
-            await state.clear()
             return
         
         # Определяем дату дедлайна
@@ -402,9 +399,10 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
             deadline = (today + timedelta(days=1)).strftime("%Y-%m-%d")
         elif deadline_type == "week":
             deadline = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+        # Для deadline_type == "none" оставляем deadline = None
         
-        # Add the goal using storage method
         try:
+            # Add the goal using storage method
             goals_storage.add_goal(
                 text=state_data["text"],
                 priority=state_data["priority"],
@@ -421,16 +419,18 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
                 reply_markup=keyboard
             )
             await callback.answer("✅ Цель добавлена")
+            await state.clear()
             
         except Exception as e:
-            logger.error(f"Error in receive_deadline: {str(e)}")
+            logger.error(f"Error saving goal: {str(e)}")
             await callback.answer(f"Ошибка при сохранении цели: {str(e)}", show_alert=True)
-        
-        await state.clear()
         
     except Exception as e:
         logger.error(f"Error in receive_deadline: {str(e)}")
         await callback.answer(f"Произошла ошибка: {str(e)}", show_alert=True)
+    
+    # Очищаем состояние только после успешного сохранения или если произошла ошибка в основном блоке
+    if not state.is_done():
         await state.clear()
 
 @router.callback_query(F.data == "goals_sort")
@@ -531,7 +531,16 @@ async def receive_goal_text(message: Message, state: FSMContext):
 async def receive_priority(callback: CallbackQuery, state: FSMContext):
     """Handle receiving the goal priority."""
     try:
-        priority = callback.data.split("_")[1]
+        # Конвертируем приоритет в русский язык
+        priority_map = {
+            "high": "высокий",
+            "medium": "средний",
+            "low": "низкий"
+        }
+        
+        raw_priority = callback.data.split("_")[1]
+        priority = priority_map.get(raw_priority, "средний")
+        
         data = await state.get_data()
         text = data.get("text")
         
@@ -565,4 +574,4 @@ async def receive_priority(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Error in receive_priority: {str(e)}")
         await callback.answer("❌ Произошла ошибка при сохранении приоритета", show_alert=True)
-        await state.clear()
+        # Не очищаем состояние здесь, чтобы пользователь мог попробовать еще раз
