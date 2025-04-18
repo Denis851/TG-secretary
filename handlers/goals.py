@@ -11,6 +11,7 @@ import os
 import re
 from constants.icons import STATUS_ICONS, PRIORITY_ICONS, TIME_ICONS, ACTION_ICONS, NAVIGATION_ICONS
 import logging
+from pydantic import ValidationError
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -375,18 +376,23 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
     try:
         parts = callback.data.split(":")
         if len(parts) < 2:
-            await callback.answer("Ошибка: неверный формат данных", show_alert=True)
+            await callback.answer("❌ Ошибка: неверный формат данных", show_alert=True)
             return
             
         deadline_type = parts[1]
         state_data = await state.get_data()
         
         if not state_data.get("text"):
-            await callback.answer("Ошибка: текст цели не найден", show_alert=True)
+            await callback.answer("❌ Ошибка: текст цели не найден", show_alert=True)
             return
             
-        if not state_data.get("priority"):
-            await callback.answer("Ошибка: приоритет не выбран", show_alert=True)
+        priority = state_data.get("priority")
+        if not priority:
+            await callback.answer("❌ Ошибка: приоритет не выбран", show_alert=True)
+            return
+            
+        if priority not in ("высокий", "средний", "низкий"):
+            await callback.answer("❌ Ошибка: некорректный приоритет", show_alert=True)
             return
         
         # Определяем дату дедлайна
@@ -405,7 +411,7 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
             # Add the goal using storage method
             goals_storage.add_goal(
                 text=state_data["text"],
-                priority=state_data["priority"],
+                priority=priority,
                 deadline=deadline
             )
             
@@ -421,15 +427,17 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
             await callback.answer("✅ Цель добавлена")
             await state.clear()
             
+        except ValidationError as e:
+            logger.error(f"Validation error while saving goal: {str(e)}")
+            await callback.answer(f"❌ {str(e)}", show_alert=True)
         except Exception as e:
             logger.error(f"Error saving goal: {str(e)}")
-            await callback.answer(f"Ошибка при сохранении цели: {str(e)}", show_alert=True)
-        
+            await callback.answer("❌ Ошибка при сохранении цели", show_alert=True)
+            
     except Exception as e:
         logger.error(f"Error in receive_deadline: {str(e)}")
-        await callback.answer(f"Произошла ошибка: {str(e)}", show_alert=True)
-    
-    # Очищаем состояние только после успешного сохранения или если произошла ошибка в основном блоке
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+        
     if not state.is_done():
         await state.clear()
 
@@ -514,9 +522,9 @@ async def receive_goal_text(message: Message, state: FSMContext):
         # Создаем клавиатуру для выбора приоритета
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔴 Высокий", callback_data="priority_high"),
-                InlineKeyboardButton(text="🟡 Средний", callback_data="priority_medium"),
-                InlineKeyboardButton(text="🟢 Низкий", callback_data="priority_low")
+                InlineKeyboardButton(text="🔴 Высокий", callback_data="priority:high"),
+                InlineKeyboardButton(text="🟡 Средний", callback_data="priority:medium"),
+                InlineKeyboardButton(text="🟢 Низкий", callback_data="priority:low")
             ]
         ])
         
@@ -538,8 +546,17 @@ async def receive_priority(callback: CallbackQuery, state: FSMContext):
             "low": "низкий"
         }
         
-        raw_priority = callback.data.split("_")[1]
-        priority = priority_map.get(raw_priority, "средний")
+        parts = callback.data.split(":")
+        if len(parts) != 2:
+            await callback.answer("❌ Ошибка: неверный формат приоритета", show_alert=True)
+            return
+            
+        raw_priority = parts[1]
+        priority = priority_map.get(raw_priority)
+        
+        if not priority:
+            await callback.answer("❌ Ошибка: неверный приоритет", show_alert=True)
+            return
         
         data = await state.get_data()
         text = data.get("text")
