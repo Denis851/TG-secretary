@@ -139,11 +139,14 @@ async def show_goals_command(message: Message):
     """Handle the 'Goals' command."""
     try:
         goals = goals_storage.get_goals()
-        keyboard, message_text = goals_keyboard.generate_goals_keyboard(goals)
-        await message.answer(text=message_text, reply_markup=keyboard)
+        keyboard = generate_goals_keyboard(goals)
+        await message.answer(
+            text="🎯 Ваши цели:",
+            reply_markup=keyboard
+        )
     except Exception as e:
         logger.error(f"Error in show_goals_command: {str(e)}", exc_info=True)
-        await message.answer(f"❌ Произошла ошибка при загрузке целей: {str(e)}")
+        await message.answer("❌ Произошла ошибка при загрузке целей")
 
 @router.callback_query(F.data == "show_goals")
 async def show_goals(callback: CallbackQuery, state: FSMContext):
@@ -479,61 +482,68 @@ async def send_goals_report(bot: Bot):
 
 @router.callback_query(F.data == "add_goal")
 async def start_add_goal(callback: CallbackQuery, state: FSMContext):
-    """Start the process of adding a new goal."""
-    await state.set_state(GoalStates.waiting_for_text)
-    await callback.message.answer("Введите текст цели:")
-    await callback.answer()
+    """Start the goal addition process."""
+    try:
+        await state.set_state(GoalStates.waiting_for_text)
+        await callback.message.answer("Введите текст цели:")
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in start_add_goal: {str(e)}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
 
 @router.message(GoalStates.waiting_for_text)
 async def receive_goal_text(message: Message, state: FSMContext):
-    """Handle the text input for a new goal."""
-    await state.update_data(text=message.text)
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=f"{PRIORITY_ICONS['high']} Высокий", callback_data="priority:high"),
-            InlineKeyboardButton(text=f"{PRIORITY_ICONS['medium']} Средний", callback_data="priority:medium"),
-            InlineKeyboardButton(text=f"{PRIORITY_ICONS['low']} Низкий", callback_data="priority:low")
-        ]
-    ])
-    
-    await message.answer("Выберите приоритет:", reply_markup=keyboard)
-    await state.set_state(GoalStates.waiting_for_priority)
-
-@router.callback_query(GoalStates.waiting_for_priority)
-async def receive_priority(callback: CallbackQuery, state: FSMContext):
-    """Handle priority selection for a new goal."""
+    """Handle receiving the goal text."""
     try:
-        parts = callback.data.split(":")
-        if len(parts) < 2:
-            await callback.answer("Ошибка: неверный формат данных", show_alert=True)
-            return
-            
-        priority = parts[1]
-        if priority not in ["high", "medium", "low"]:
-            await callback.answer("Ошибка: неверный приоритет", show_alert=True)
-            return
-            
-        await state.update_data(priority=priority)
+        text = message.text.strip()
+        await state.update_data(text=text)
         
+        # Создаем клавиатуру для выбора приоритета
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text=f"{TIME_ICONS['clock']} Сегодня", callback_data=f"deadline:{datetime.now().strftime('%Y-%m-%d')}"),
-                InlineKeyboardButton(text=f"{TIME_ICONS['clock']} Завтра", callback_data=f"deadline:{(datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')}")
-            ],
-            [
-                InlineKeyboardButton(text=f"{TIME_ICONS['calendar']} Неделя", callback_data=f"deadline:{(datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')}"),
-                InlineKeyboardButton(text=f"{TIME_ICONS['calendar']} Месяц", callback_data=f"deadline:{(datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')}")
-            ],
-            [
-                InlineKeyboardButton(text="Без срока", callback_data="deadline:none")
+                InlineKeyboardButton(text="🔴 Высокий", callback_data="priority_high"),
+                InlineKeyboardButton(text="🟡 Средний", callback_data="priority_medium"),
+                InlineKeyboardButton(text="🟢 Низкий", callback_data="priority_low")
             ]
         ])
         
-        await callback.message.edit_text("Выберите срок:", reply_markup=keyboard)
-        await state.set_state(GoalStates.waiting_for_deadline)
+        await message.answer("Выберите приоритет:", reply_markup=keyboard)
+        await state.set_state(GoalStates.waiting_for_priority)
+    except Exception as e:
+        logger.error(f"Error in receive_goal_text: {str(e)}")
+        await message.answer("❌ Произошла ошибка при сохранении текста цели")
+        await state.clear()
+
+@router.callback_query(GoalStates.waiting_for_priority)
+async def receive_priority(callback: CallbackQuery, state: FSMContext):
+    """Handle receiving the goal priority."""
+    try:
+        priority = callback.data.split("_")[1]
+        data = await state.get_data()
+        text = data.get("text")
+        
+        if not text:
+            await callback.answer("❌ Ошибка: текст цели не найден", show_alert=True)
+            await state.clear()
+            return
+            
+        # Добавляем цель с выбранным приоритетом
+        goals_storage.add_goal(
+            text=text,
+            priority=priority
+        )
+        
+        goals = goals_storage.get_goals()
+        keyboard = generate_goals_keyboard(goals)
+        
+        await callback.message.edit_text(
+            text="🎯 Ваши цели:",
+            reply_markup=keyboard
+        )
+        await callback.answer("✅ Цель добавлена")
+        await state.clear()
         
     except Exception as e:
         logger.error(f"Error in receive_priority: {str(e)}")
-        await callback.answer(f"Произошла ошибка: {str(e)}", show_alert=True)
-    await state.clear()
+        await callback.answer("❌ Произошла ошибка при сохранении цели", show_alert=True)
+        await state.clear()
