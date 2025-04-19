@@ -3,34 +3,46 @@ import logging
 import signal
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.client.default import DefaultBotProperties
+from redis import asyncio as aioredis
+from aiohttp import web
 from handlers import checklist, goals, start, progress, mood, schedule, settings, reports
 from services.scheduler import setup_jobs
-from aiogram.types import Message
-from aiogram.filters import Command
-from keyboards.main import get_main_keyboard
-import os
-from dotenv import load_dotenv
+from services.keep_alive import KeepAliveService
+from middlewares.rate_limit import RateLimitMiddleware
+from middlewares.error_handler import GlobalErrorHandler
+from health import setup_health_check
+from config import settings
+import structlog
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# Настройка структурированного логирования
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer()
+    ],
+    wrapper_class=structlog.BoundLogger,
+    context_class=dict,
+    logger_factory=structlog.PrintLoggerFactory(),
 )
-logger = logging.getLogger(__name__)
 
-# Загрузка переменных окружения
-load_dotenv()
+logger = structlog.get_logger()
 
 # Глобальные переменные для корректного завершения
 bot = None
 dp = None
 scheduler = None
+redis = None
+keep_alive = None
 
 async def on_shutdown(dispatcher: Dispatcher, bot: Bot):
     """Действия при завершении работы бота"""
-    logger.info("Shutting down...")
+    logger.info("shutting_down")
+    
+    # Остановка keep-alive сервиса
+    if keep_alive:
+        await keep_alive.stop()
     
     # Остановка планировщика
     if scheduler:
@@ -39,29 +51,76 @@ async def on_shutdown(dispatcher: Dispatcher, bot: Bot):
     # Закрытие сессии бота
     await bot.session.close()
     
-    logger.info("Bye!")
+    # Закрытие Redis соединения
+    if redis:
+        await redis.close()
+    
+    logger.info("shutdown_complete")
 
 def signal_handler(signum, frame):
     """Обработчик сигналов завершения"""
-    logger.info(f"Received signal {signum}")
+    logger.info("received_signal", signal=signum)
     asyncio.create_task(on_shutdown(dp, bot))
 
-async def main():
-    global bot, dp, scheduler
+async def setup_redis():
+    """Настройка Redis с повторными попытками"""
+    max_retries = 5
+    retry_delay = 5
     
-    # Проверка наличия токена
-    bot_token = os.getenv('BOT_TOKEN')
-    if not bot_token:
-        raise ValueError("BOT_TOKEN не найден в переменных окружения")
+    for attempt in range(max_retries):
+        try:
+            redis = aioredis.from_url(settings.REDIS_URL)
+            await redis.ping()
+            logger.info("redis_connection_established")
+            return redis
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning("redis_connection_failed", error=str(e), retry_in=retry_delay)
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error("redis_connection_failed_after_all_attempts", error=str(e))
+                raise
 
-    # Инициализация бота и диспетчера
-    bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+async def main():
+    global bot, dp, scheduler, redis, keep_alive
     
     try:
-        # Удаляем webhook и ждем завершения операции
-        await bot.delete_webhook(drop_pending_updates=True)
+        # Инициализация Redis с повторными попытками
+        redis = await setup_redis()
         
-        dp = Dispatcher(storage=MemoryStorage())
+        # Инициализация бота и диспетчера
+        bot = Bot(
+            token=settings.BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
+        
+        # Удаляем webhook с несколькими попытками
+        max_retries = 3
+        retry_delay = 5  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info("attempting_to_delete_webhook", attempt=attempt + 1, max_retries=max_retries)
+                await bot.delete_webhook(drop_pending_updates=True)
+                logger.info("webhook_deleted_successfully")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning("webhook_deletion_failed", error=str(e), retry_in=retry_delay)
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error("webhook_deletion_failed_after_all_attempts", error=str(e))
+                    raise
+        
+        # Инициализация диспетчера с Redis storage
+        storage = RedisStorage(redis=redis)
+        dp = Dispatcher(storage=storage)
+        
+        # Подключаем middleware
+        dp.message.middleware(RateLimitMiddleware(redis))
+        dp.callback_query.middleware(RateLimitMiddleware(redis))
+        dp.message.middleware(GlobalErrorHandler())
+        dp.callback_query.middleware(GlobalErrorHandler())
 
         # Подключаем handlers
         dp.include_router(start.router)
@@ -76,16 +135,30 @@ async def main():
         # Инициализация планировщика задач
         scheduler = setup_jobs(bot)
 
+        # Инициализация и запуск keep-alive сервиса
+        keep_alive = KeepAliveService(bot)
+        await keep_alive.start()
+
         # Установка обработчиков сигналов
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
+        # Создание и настройка web приложения для health check
+        app = web.Application()
+        setup_health_check(app, bot)
+        
+        # Запуск web сервера в отдельной задаче
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        await site.start()
+
         # Запуск polling
-        logger.info("Бот запущен")
+        logger.info("bot_started")
         await dp.start_polling(bot)
         
     except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
+        logger.error("bot_startup_error", error=str(e))
         raise
     finally:
         await on_shutdown(dp, bot)
@@ -94,4 +167,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot stopped!")
+        logger.info("bot_stopped")
