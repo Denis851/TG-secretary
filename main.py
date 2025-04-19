@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import signal
+import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
@@ -150,7 +151,8 @@ async def main():
         # Запуск web сервера в отдельной задаче
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        port = int(os.getenv('PORT', 8080))
+        site = web.TCPSite(runner, '0.0.0.0', port)
         await site.start()
 
         # Запуск polling
