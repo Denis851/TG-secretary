@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir \
     APScheduler==3.10.1 \
     pytz==2023.3 \
     python-dateutil==2.8.2 \
-    aiohttp==3.8.5 \
+    aiohttp==3.9.1 \
     Pillow==9.5.0 \
     redis==4.6.0 \
     pydantic==1.10.13 \
