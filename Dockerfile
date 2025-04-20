@@ -3,7 +3,7 @@ FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies with optimized settings
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
