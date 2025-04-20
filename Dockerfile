@@ -1,9 +1,9 @@
 # Build stage
-FROM python:3.11-slim as builder
+FROM python:3.11-bullseye as builder
 
 WORKDIR /app
 
-# Install build dependencies with optimized settings
+# Install build dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
@@ -12,6 +12,7 @@ RUN apt-get update && \
     gcc \
     libc6-dev \
     libffi-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -49,7 +50,7 @@ RUN pip install --no-cache-dir \
     sphinx==7.1.2
 
 # Runtime stage
-FROM python:3.11-slim
+FROM python:3.11-bullseye-slim
 
 WORKDIR /app
 
@@ -57,7 +58,7 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     libpq5 \
-    libffi7 \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
