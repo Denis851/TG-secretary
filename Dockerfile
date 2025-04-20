@@ -1,5 +1,5 @@
 # Build stage
-FROM python:3.11-bullseye as builder
+FROM python:3.11.7-slim as builder
 
 WORKDIR /app
 
@@ -50,7 +50,7 @@ RUN pip install --no-cache-dir \
     sphinx==7.1.2
 
 # Runtime stage
-FROM python:3.11-bullseye-slim
+FROM python:3.11.7-slim
 
 WORKDIR /app
 
