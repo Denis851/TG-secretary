@@ -3,7 +3,7 @@ FROM python:3.11-bullseye as builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies with updated configuration
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
