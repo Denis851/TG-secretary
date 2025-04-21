@@ -14,7 +14,7 @@ from services.keep_alive import KeepAliveService
 from middlewares.rate_limit import RateLimitMiddleware
 from middlewares.error_handler import GlobalErrorHandler
 from health import setup_health_check
-from config import settings
+from config import settings, clean_template_var
 import structlog
 from urllib.parse import urlparse
 
@@ -82,6 +82,13 @@ async def setup_redis():
                 parsed = urlparse(redis_url)
                 if not parsed.scheme or not parsed.hostname:
                     raise ValueError("Invalid Redis URL format")
+                
+                # Check if port is valid
+                if parsed.port is not None:
+                    try:
+                        int(parsed.port)
+                    except ValueError:
+                        raise ValueError(f"Invalid port in Redis URL: {parsed.port}")
             except ValueError as e:
                 logger.error("invalid_redis_url", error=str(e), url=redis_url)
                 raise

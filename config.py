@@ -15,6 +15,17 @@ def get_env_or_default(key: str, default: any) -> any:
         return default
     return value
 
+def clean_template_var(value: str) -> str:
+    """Clean template variables from a string"""
+    if not value:
+        return value
+    # Remove ${ and } from the string
+    cleaned = value.replace('${', '').replace('}', '')
+    # If there's a default value after :, take only the variable name
+    if ':' in cleaned:
+        cleaned = cleaned.split(':')[0]
+    return cleaned
+
 class Settings(BaseSettings):
     # Bot settings
     BOT_TOKEN: str = Field(..., env='BOT_TOKEN')
@@ -56,8 +67,8 @@ class Settings(BaseSettings):
             
         # If it's a string, try to parse it
         if isinstance(v, str):
-            # Remove any shell-style variable substitution and get the first part
-            v = v.replace('${', '').replace('}', '').split(':')[0]
+            # Clean template variables
+            v = clean_template_var(v)
             # If the value is the variable name itself, return default
             if v in ['REDIS_PORT', 'REDIS_DB']:
                 return 6379 if info.field_name == 'REDIS_PORT' else 0
@@ -70,24 +81,29 @@ class Settings(BaseSettings):
         # For any other type, return default
         return 6379 if info.field_name == 'REDIS_PORT' else 0
     
+    @field_validator('REDIS_HOST', 'REDIS_USER', 'REDIS_PASSWORD', mode='before')
+    @classmethod
+    def clean_string_fields(cls, v):
+        if v is None:
+            return v
+        return clean_template_var(str(v))
+    
     @property
     def redis_url(self) -> str:
         """Get Redis URL from environment or construct from components"""
-        if self.REDIS_URL and self.REDIS_URL != 'REDIS_URL':
-            # Clean up the URL if it contains template variables
-            url = self.REDIS_URL.replace('${', '').replace('}', '')
+        # If REDIS_URL is provided and not a template variable
+        if self.REDIS_URL and self.REDIS_URL != 'REDIS_URL' and not self.REDIS_URL.startswith('${'):
             try:
                 # Validate the URL
-                parsed = urlparse(url)
+                parsed = urlparse(self.REDIS_URL)
                 if parsed.scheme and parsed.hostname:
-                    return url
+                    return self.REDIS_URL
             except ValueError:
                 pass
             
         # Construct Redis URL from components
         auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-        host = self.REDIS_HOST.replace('${', '').replace('}', '')
-        return f"redis://{auth}{host}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings
     DATABASE_URL: str = Field(
