@@ -7,8 +7,6 @@ from services.storage import task_storage, ValidationError, StorageError
 from keyboards.checklist import ChecklistKeyboard
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
-from services.config import Config
-from services.checklist_storage import ChecklistStorage
 from log import logger
 
 router = Router()
