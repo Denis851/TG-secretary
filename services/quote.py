@@ -1,5 +1,5 @@
 from aiogram import Bot
-from config import USER_ID
+from config import settings
 import random
 
 QUOTES = [
@@ -11,4 +11,4 @@ QUOTES = [
 
 async def send_quote(bot: Bot):
     quote = random.choice(QUOTES)
-    await bot.send_message(USER_ID, f"Доброе утро! ☀️\n\n{quote}")
+    await bot.send_message(settings.USER_ID, f"Доброе утро! ☀️\n\n{quote}")
