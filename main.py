@@ -101,7 +101,8 @@ async def setup_redis():
                 health_check_interval=30,
                 socket_timeout=5.0,
                 socket_connect_timeout=5.0,
-                retry_on_error=[ConnectionError]
+                retry_on_error=[ConnectionError],
+                encoding='utf-8'
             )
             
             # Test connection
