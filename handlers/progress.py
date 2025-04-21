@@ -1,7 +1,7 @@
 from aiogram import Bot, Router, F
 from aiogram.types import Message
 from services.storage import TaskStorage, GoalStorage
-from config import USER_ID
+from config import settings
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -18,14 +18,18 @@ async def handle_progress(message: Message):
 async def send_checklist_report(bot: Bot):
     tasks = task_storage.get_tasks()
     incomplete = [t for t in tasks if not t.get("completed") and not t.get("done")]
+    
+    if not incomplete:
+        await bot.send_message(
+            chat_id=settings.USER_ID,
+            text="✅ Все задачи на сегодня выполнены!"
+        )
+        return
 
-    if incomplete:
-        text = "📝 Невыполненные задачи на сегодня:\n\n"
-        text += "\n".join([f"🔲 {t['text']}" for t in incomplete])
-    else:
-        text = "✅ Все задачи выполнены сегодня! Отличная работа 💪"
+    text = "📝 Невыполненные задачи на сегодня:\n\n"
+    text += "\n".join([f"🔲 {t['text']}" for t in incomplete])
 
-    await bot.send_message(USER_ID, text)
+    await bot.send_message(settings.USER_ID, text)
 
 async def send_goals_report(bot: Bot):
     goals = goal_storage.get_goals()
@@ -37,7 +41,7 @@ async def send_goals_report(bot: Bot):
     else:
         text = "🎉 Все цели достигнуты! Пора ставить новые 🚀"
 
-    await bot.send_message(USER_ID, text)
+    await bot.send_message(settings.USER_ID, text)
 
 # ---------- 📈 Прогресс по команде "📈 Прогресс" ----------
 
@@ -67,7 +71,7 @@ async def send_text_progress(bot: Bot):
     else:
         text += "\n📈 Двигаемся вперёд! Каждый шаг важен."
 
-    await bot.send_message(USER_ID, text)
+    await bot.send_message(settings.USER_ID, text)
 
 # ---------- 📊 Воскресный анализ недели ----------
 
