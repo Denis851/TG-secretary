@@ -31,15 +31,21 @@ class Settings(BaseSettings):
         default=None,
         env='REDIS_PASSWORD'
     )
+    REDIS_USER: str = Field(
+        default='default',
+        env='REDIS_USER'
+    )
     
     @property
     def redis_url(self) -> str:
         """Get Redis URL from environment or construct from components"""
         if self.REDIS_URL:
-            return self.REDIS_URL
+            # Clean up the URL if it contains template variables
+            url = self.REDIS_URL.replace('${{', '').replace('}}', '')
+            return url
             
         # Construct Redis URL from components
-        auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings
