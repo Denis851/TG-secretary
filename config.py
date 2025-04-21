@@ -45,14 +45,20 @@ class Settings(BaseSettings):
     
     @field_validator('REDIS_PORT', 'REDIS_DB', mode='before')
     @classmethod
-    def parse_int_fields(cls, v):
+    def parse_int_fields(cls, v, info):
+        if v is None:
+            # If value is None, return the default value from the field
+            field = info.field
+            return field.default
         if isinstance(v, str):
             # Remove any shell-style variable substitution
             v = v.replace('${', '').replace('}', '').split(':')[0]
             try:
                 return int(v)
             except ValueError:
-                return None
+                # If conversion fails, return the default value
+                field = info.field
+                return field.default
         return v
     
     @property
