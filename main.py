@@ -72,18 +72,17 @@ async def setup_redis():
     
     for attempt in range(max_retries):
         try:
-            # Parse Redis URL to get host and port
+            # Get Redis configuration
             redis_url = settings.REDIS_URL
-            if not redis_url:
-                redis_url = "redis://localhost:6379"
-                logger.warning("redis_url_not_set_using_default", url=redis_url)
+            logger.info("connecting_to_redis", url=redis_url)
             
             redis = aioredis.from_url(
                 redis_url,
                 decode_responses=True,
-                socket_timeout=5,
-                socket_connect_timeout=5,
-                retry_on_timeout=True
+                socket_timeout=settings.REDIS_SOCKET_TIMEOUT,
+                socket_connect_timeout=settings.REDIS_SOCKET_TIMEOUT,
+                retry_on_timeout=True,
+                max_connections=settings.REDIS_MAX_CONNECTIONS
             )
             
             # Test connection

@@ -13,9 +13,21 @@ class Settings(BaseSettings):
     USER_ID: Optional[int] = Field(None, env='USER_ID')
     
     # Redis settings
-    REDIS_URL: str = Field(
-        default='redis://localhost:6379',
-        env='REDIS_URL'
+    REDIS_HOST: str = Field(
+        default='redis',
+        env='REDIS_HOST'
+    )
+    REDIS_PORT: int = Field(
+        default=6379,
+        env='REDIS_PORT'
+    )
+    REDIS_DB: int = Field(
+        default=0,
+        env='REDIS_DB'
+    )
+    REDIS_PASSWORD: Optional[str] = Field(
+        default=None,
+        env='REDIS_PASSWORD'
     )
     REDIS_MAX_CONNECTIONS: int = Field(
         default=10,
@@ -25,6 +37,12 @@ class Settings(BaseSettings):
         default=5,
         env='REDIS_SOCKET_TIMEOUT'
     )
+    
+    @property
+    def REDIS_URL(self) -> str:
+        """Construct Redis URL from components"""
+        auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings
     DATABASE_URL: str = Field(
