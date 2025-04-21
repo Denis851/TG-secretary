@@ -34,6 +34,7 @@ RUN pip install --no-cache-dir \
     Pillow==9.5.0 \
     redis==4.6.0 \
     pydantic==2.4.2 \
+    pydantic-settings==2.0.3 \
     structlog==23.1.0 \
     aiohttp-cors==0.7.0 \
     python-json-logger==2.0.7 \
