@@ -3,6 +3,7 @@ from typing import Optional
 import os
 from dotenv import load_dotenv
 from pydantic import Field
+from urllib.parse import urlparse
 
 # Load environment variables
 load_dotenv()
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
     USER_ID: Optional[int] = Field(None, env='USER_ID')
     
     # Redis settings
+    REDIS_URL: Optional[str] = Field(None, env='REDIS_URL')
     REDIS_HOST: str = Field(
         default='redis',
         env='REDIS_HOST'
@@ -39,8 +41,11 @@ class Settings(BaseSettings):
     )
     
     @property
-    def REDIS_URL(self) -> str:
-        """Construct Redis URL from components"""
+    def redis_url(self) -> str:
+        """Get Redis URL, either from REDIS_URL or construct from components"""
+        if self.REDIS_URL:
+            return self.REDIS_URL
+        
         auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     

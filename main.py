@@ -73,21 +73,23 @@ async def setup_redis():
     for attempt in range(max_retries):
         try:
             # Get Redis configuration
-            redis_url = settings.REDIS_URL
-            logger.info("connecting_to_redis", url=redis_url)
+            redis_url = settings.redis_url
+            logger.info("connecting_to_redis", attempt=attempt + 1, max_retries=max_retries)
             
+            # Create Redis connection with retry settings
             redis = aioredis.from_url(
                 redis_url,
                 decode_responses=True,
                 socket_timeout=settings.REDIS_SOCKET_TIMEOUT,
                 socket_connect_timeout=settings.REDIS_SOCKET_TIMEOUT,
                 retry_on_timeout=True,
-                max_connections=settings.REDIS_MAX_CONNECTIONS
+                max_connections=settings.REDIS_MAX_CONNECTIONS,
+                health_check_interval=30
             )
             
             # Test connection
             await redis.ping()
-            logger.info("redis_connection_established", url=redis_url)
+            logger.info("redis_connection_established")
             return redis
             
         except ConnectionError as e:

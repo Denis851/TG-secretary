@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: tg-secretary-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/health"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 5s
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: tg-secretary-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  bot-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local 
