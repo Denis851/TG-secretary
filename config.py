@@ -15,13 +15,32 @@ class Settings(BaseSettings):
     
     # Redis settings
     REDIS_URL: Optional[str] = Field(None, env='REDIS_URL')
+    REDIS_HOST: str = Field(
+        default='redis',
+        env='REDIS_HOST'
+    )
+    REDIS_PORT: int = Field(
+        default=6379,
+        env='REDIS_PORT'
+    )
+    REDIS_DB: int = Field(
+        default=0,
+        env='REDIS_DB'
+    )
+    REDIS_PASSWORD: Optional[str] = Field(
+        default=None,
+        env='REDIS_PASSWORD'
+    )
     
     @property
     def redis_url(self) -> str:
-        """Get Redis URL from environment"""
-        if not self.REDIS_URL:
-            raise ValueError("REDIS_URL environment variable is not set")
-        return self.REDIS_URL
+        """Get Redis URL from environment or construct from components"""
+        if self.REDIS_URL:
+            return self.REDIS_URL
+            
+        # Construct Redis URL from components
+        auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings
     DATABASE_URL: str = Field(
