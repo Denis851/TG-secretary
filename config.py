@@ -46,20 +46,29 @@ class Settings(BaseSettings):
     @field_validator('REDIS_PORT', 'REDIS_DB', mode='before')
     @classmethod
     def parse_int_fields(cls, v, info):
-        if v is None:
-            # If value is None, return the default value from the field
-            field = info.field
-            return field.default
+        # If value is None or empty, return default
+        if v is None or v == '':
+            return 6379 if info.field_name == 'REDIS_PORT' else 0
+            
+        # If it's already an integer, return it
+        if isinstance(v, int):
+            return v
+            
+        # If it's a string, try to parse it
         if isinstance(v, str):
-            # Remove any shell-style variable substitution
+            # Remove any shell-style variable substitution and get the first part
             v = v.replace('${', '').replace('}', '').split(':')[0]
+            # If the value is the variable name itself, return default
+            if v in ['REDIS_PORT', 'REDIS_DB']:
+                return 6379 if info.field_name == 'REDIS_PORT' else 0
             try:
                 return int(v)
             except ValueError:
-                # If conversion fails, return the default value
-                field = info.field
-                return field.default
-        return v
+                # If conversion fails, return default
+                return 6379 if info.field_name == 'REDIS_PORT' else 0
+                
+        # For any other type, return default
+        return 6379 if info.field_name == 'REDIS_PORT' else 0
     
     @property
     def redis_url(self) -> str:
@@ -67,6 +76,10 @@ class Settings(BaseSettings):
         if self.REDIS_URL:
             # Clean up the URL if it contains template variables
             url = self.REDIS_URL.replace('${', '').replace('}', '')
+            # If the URL is just the variable name, construct from components
+            if url == 'REDIS_URL':
+                auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+                return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
             return url
             
         # Construct Redis URL from components
