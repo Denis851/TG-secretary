@@ -1,7 +1,8 @@
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import os
 from dotenv import load_dotenv
+from pydantic import Field
 
 # Load environment variables
 load_dotenv()
