@@ -40,9 +40,7 @@ class Settings(BaseSettings):
     def redis_url(self) -> str:
         """Get Redis URL from environment or construct from components"""
         if self.REDIS_URL:
-            # Clean up the URL if it contains template variables
-            url = self.REDIS_URL.replace('${{', '').replace('}}', '')
-            return url
+            return self.REDIS_URL
             
         # Construct Redis URL from components
         auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
@@ -107,9 +105,11 @@ class Settings(BaseSettings):
     SCHEDULE_PATH: str = os.path.join(DATA_DIR, "schedule.json")
     MOOD_PATH: str = os.path.join(DATA_DIR, "mood.json")
     
-    class Config:
-        env_file = '.env'
-        env_file_encoding = 'utf-8'
+    model_config = SettingsConfigDict(
+        env_file='.env',
+        env_file_encoding='utf-8',
+        extra='ignore'
+    )
 
 # Create global settings instance
 settings = Settings()
