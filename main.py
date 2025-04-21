@@ -5,7 +5,7 @@ import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.client.session.middlewares import BaseMiddleware
+from aiogram.client.base import BaseMiddleware
 from redis import asyncio as aioredis
 from aiohttp import web
 from handlers import checklist, goals, start, progress, mood, schedule, settings, reports
