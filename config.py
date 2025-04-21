@@ -73,18 +73,21 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         """Get Redis URL from environment or construct from components"""
-        if self.REDIS_URL:
+        if self.REDIS_URL and self.REDIS_URL != 'REDIS_URL':
             # Clean up the URL if it contains template variables
             url = self.REDIS_URL.replace('${', '').replace('}', '')
-            # If the URL is just the variable name, construct from components
-            if url == 'REDIS_URL':
-                auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-                return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-            return url
+            try:
+                # Validate the URL
+                parsed = urlparse(url)
+                if parsed.scheme and parsed.hostname:
+                    return url
+            except ValueError:
+                pass
             
         # Construct Redis URL from components
         auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
-        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        host = self.REDIS_HOST.replace('${', '').replace('}', '')
+        return f"redis://{auth}{host}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings
     DATABASE_URL: str = Field(

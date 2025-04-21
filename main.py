@@ -16,6 +16,7 @@ from middlewares.error_handler import GlobalErrorHandler
 from health import setup_health_check
 from config import settings
 import structlog
+from urllib.parse import urlparse
 
 # Настройка структурированного логирования
 structlog.configure(
@@ -74,7 +75,16 @@ async def setup_redis():
         try:
             # Get Redis URL from environment
             redis_url = settings.redis_url
-            logger.info("connecting_to_redis", attempt=attempt + 1, max_retries=max_retries)
+            logger.info("connecting_to_redis", attempt=attempt + 1, max_retries=max_retries, url=redis_url)
+            
+            # Validate Redis URL
+            try:
+                parsed = urlparse(redis_url)
+                if not parsed.scheme or not parsed.hostname:
+                    raise ValueError("Invalid Redis URL format")
+            except ValueError as e:
+                logger.error("invalid_redis_url", error=str(e), url=redis_url)
+                raise
             
             # Create Redis connection
             redis = aioredis.from_url(
@@ -89,7 +99,7 @@ async def setup_redis():
             logger.info("redis_connection_established")
             return redis
             
-        except ConnectionError as e:
+        except (ConnectionError, ValueError) as e:
             if attempt < max_retries - 1:
                 logger.warning(
                     "redis_connection_failed",
@@ -100,11 +110,8 @@ async def setup_redis():
                 )
                 await asyncio.sleep(retry_delay)
             else:
-                logger.error("redis_connection_failed_after_all_attempts", error=str(e))
+                logger.error("redis_connection_failed_final", error=str(e))
                 raise
-        except Exception as e:
-            logger.error("unexpected_redis_error", error=str(e))
-            raise
 
 async def main():
     global bot, dp, scheduler, redis, keep_alive
