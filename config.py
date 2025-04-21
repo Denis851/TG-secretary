@@ -91,7 +91,18 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         """Get Redis URL from environment or construct from components"""
-        # If REDIS_URL is provided and not a template variable
+        # Check for Railway's REDIS_URL
+        railway_redis_url = os.getenv('REDIS_URL')
+        if railway_redis_url and railway_redis_url != 'REDIS_URL' and not railway_redis_url.startswith('${'):
+            try:
+                # Validate the URL
+                parsed = urlparse(railway_redis_url)
+                if parsed.scheme and parsed.hostname:
+                    return railway_redis_url
+            except ValueError:
+                pass
+        
+        # Check for our REDIS_URL setting
         if self.REDIS_URL and self.REDIS_URL != 'REDIS_URL' and not self.REDIS_URL.startswith('${'):
             try:
                 # Validate the URL
