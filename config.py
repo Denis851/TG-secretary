@@ -34,9 +34,8 @@ class Settings(BaseSettings):
     # Redis settings
     REDIS_URL: Optional[str] = Field(None, env='REDIS_URL')
     REDIS_HOST: str = Field(
-        default='redis',
-        env='REDIS_HOST',
-        description='Redis hostname. Can be "redis" or "redis_host"'
+        default='localhost',
+        env='REDIS_HOST'
     )
     REDIS_PORT: int = Field(
         default=6379,
@@ -46,12 +45,12 @@ class Settings(BaseSettings):
         default=0,
         env='REDIS_DB'
     )
-    REDIS_PASSWORD: str = Field(
-        default='redis',
+    REDIS_PASSWORD: Optional[str] = Field(
+        default=None,
         env='REDIS_PASSWORD'
     )
-    REDIS_USER: str = Field(
-        default='default',
+    REDIS_USER: Optional[str] = Field(
+        default=None,
         env='REDIS_USER'
     )
     
@@ -85,19 +84,16 @@ class Settings(BaseSettings):
     @field_validator('REDIS_HOST', mode='before')
     @classmethod
     def validate_redis_host(cls, v):
-        if v is None:
-            return 'redis'
+        if v is None or v == '':
+            return 'localhost'
         v = clean_template_var(str(v))
-        # Handle both 'redis' and 'redis_host' hostnames
-        if v in ['redis', 'redis_host']:
-            return v
-        return 'redis'  # Default to 'redis' if neither is specified
+        return v
     
     @field_validator('REDIS_USER', 'REDIS_PASSWORD', mode='before')
     @classmethod
     def clean_string_fields(cls, v):
         if v is None or v == '':
-            return 'default' if v == 'REDIS_USER' else 'redis'
+            return None
         return clean_template_var(str(v))
     
     @property
@@ -125,7 +121,12 @@ class Settings(BaseSettings):
                 pass
             
         # Construct Redis URL from components
-        auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@"
+        auth = ""
+        if self.REDIS_USER and self.REDIS_PASSWORD:
+            auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@"
+        elif self.REDIS_PASSWORD:
+            auth = f":{self.REDIS_PASSWORD}@"
+            
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings
