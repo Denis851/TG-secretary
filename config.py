@@ -2,11 +2,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 import os
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, field_validator
 from urllib.parse import urlparse
 
 # Load environment variables
 load_dotenv()
+
+def get_env_or_default(key: str, default: any) -> any:
+    """Get environment variable or return default value"""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return value
 
 class Settings(BaseSettings):
     # Bot settings
@@ -36,11 +43,25 @@ class Settings(BaseSettings):
         env='REDIS_USER'
     )
     
+    @field_validator('REDIS_PORT', 'REDIS_DB', mode='before')
+    @classmethod
+    def parse_int_fields(cls, v):
+        if isinstance(v, str):
+            # Remove any shell-style variable substitution
+            v = v.replace('${', '').replace('}', '').split(':')[0]
+            try:
+                return int(v)
+            except ValueError:
+                return None
+        return v
+    
     @property
     def redis_url(self) -> str:
         """Get Redis URL from environment or construct from components"""
         if self.REDIS_URL:
-            return self.REDIS_URL
+            # Clean up the URL if it contains template variables
+            url = self.REDIS_URL.replace('${', '').replace('}', '')
+            return url
             
         # Construct Redis URL from components
         auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
