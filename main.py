@@ -105,10 +105,13 @@ async def setup_redis():
                 encoding='utf-8'
             )
             
-            # Test connection
-            await redis.ping()
-            logger.info("redis_connection_established")
-            return redis
+            # Test connection with timeout
+            try:
+                await asyncio.wait_for(redis.ping(), timeout=5.0)
+                logger.info("redis_connection_established")
+                return redis
+            except asyncio.TimeoutError:
+                raise ConnectionError("Redis connection timeout")
             
         except (ConnectionError, ValueError) as e:
             if attempt < max_retries - 1:
