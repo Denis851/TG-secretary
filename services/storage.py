@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass
-from config import CHECKLIST_PATH, GOALS_PATH, SCHEDULE_PATH, MOOD_PATH
+from config import settings
 import re
 
 # Настройка логирования
@@ -120,7 +120,7 @@ class TaskStorage(BaseStorage):
     """Класс для работы с задачами"""
     
     def __init__(self):
-        super().__init__(CHECKLIST_PATH)
+        super().__init__(settings.CHECKLIST_PATH)
         self.validation_rules.allowed_priorities = ("высокий", "средний", "низкий")
     
     def get_tasks(self) -> List[Dict[str, Any]]:
@@ -167,7 +167,7 @@ class GoalStorage(BaseStorage):
     """Класс для работы с целями"""
     
     def __init__(self):
-        super().__init__(GOALS_PATH)
+        super().__init__(settings.GOALS_PATH)
         self.validation_rules.allowed_priorities = ("высокий", "средний", "низкий")
     
     def get_goals(self) -> List[Dict[str, Any]]:
@@ -216,7 +216,7 @@ class MoodStorage(BaseStorage):
     """Класс для работы с записями настроения"""
     
     def __init__(self):
-        super().__init__(MOOD_PATH)
+        super().__init__(settings.MOOD_PATH)
     
     def get_moods(self) -> List[Dict[str, Any]]:
         """Получает список всех записей о настроении"""
@@ -251,7 +251,7 @@ class ScheduleStorage(BaseStorage):
     """Класс для работы с расписанием"""
     
     def __init__(self):
-        super().__init__(SCHEDULE_PATH)
+        super().__init__(settings.SCHEDULE_PATH)
     
     def get_schedule(self) -> List[Dict[str, Any]]:
         """Получает список всех записей расписания"""
