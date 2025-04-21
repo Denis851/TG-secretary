@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 from redis import asyncio as aioredis
+from redis.exceptions import ConnectionError
 from aiohttp import web
 from handlers import checklist, goals, start, progress, mood, schedule, settings, reports
 from services.scheduler import setup_jobs
@@ -49,7 +50,8 @@ async def on_shutdown(dispatcher: Dispatcher, bot: Bot):
         scheduler.shutdown()
     
     # Закрытие сессии бота
-    await bot.session.close()
+    if bot and hasattr(bot, 'session'):
+        await bot.session.close()
     
     # Закрытие Redis соединения
     if redis:
@@ -60,7 +62,8 @@ async def on_shutdown(dispatcher: Dispatcher, bot: Bot):
 def signal_handler(signum, frame):
     """Обработчик сигналов завершения"""
     logger.info("received_signal", signal=signum)
-    asyncio.create_task(on_shutdown(dp, bot))
+    if dp and bot:
+        asyncio.create_task(on_shutdown(dp, bot))
 
 async def setup_redis():
     """Настройка Redis с повторными попытками"""
@@ -69,17 +72,41 @@ async def setup_redis():
     
     for attempt in range(max_retries):
         try:
-            redis = aioredis.from_url(settings.REDIS_URL)
+            # Parse Redis URL to get host and port
+            redis_url = settings.REDIS_URL
+            if not redis_url:
+                redis_url = "redis://localhost:6379"
+                logger.warning("redis_url_not_set_using_default", url=redis_url)
+            
+            redis = aioredis.from_url(
+                redis_url,
+                decode_responses=True,
+                socket_timeout=5,
+                socket_connect_timeout=5,
+                retry_on_timeout=True
+            )
+            
+            # Test connection
             await redis.ping()
-            logger.info("redis_connection_established")
+            logger.info("redis_connection_established", url=redis_url)
             return redis
-        except Exception as e:
+            
+        except ConnectionError as e:
             if attempt < max_retries - 1:
-                logger.warning("redis_connection_failed", error=str(e), retry_in=retry_delay)
+                logger.warning(
+                    "redis_connection_failed",
+                    error=str(e),
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    retry_in=retry_delay
+                )
                 await asyncio.sleep(retry_delay)
             else:
                 logger.error("redis_connection_failed_after_all_attempts", error=str(e))
                 raise
+        except Exception as e:
+            logger.error("unexpected_redis_error", error=str(e))
+            raise
 
 async def main():
     global bot, dp, scheduler, redis, keep_alive
@@ -91,7 +118,7 @@ async def main():
         # Инициализация бота и диспетчера
         bot = Bot(
             token=settings.BOT_TOKEN,
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+            parse_mode=ParseMode.HTML
         )
         
         # Удаляем webhook с несколькими попытками
