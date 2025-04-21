@@ -46,12 +46,12 @@ class Settings(BaseSettings):
         default=0,
         env='REDIS_DB'
     )
-    REDIS_PASSWORD: Optional[str] = Field(
-        default=None,
+    REDIS_PASSWORD: str = Field(
+        default='redis',
         env='REDIS_PASSWORD'
     )
-    REDIS_USER: Optional[str] = Field(
-        default=None,
+    REDIS_USER: str = Field(
+        default='default',
         env='REDIS_USER'
     )
     
@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     @classmethod
     def clean_string_fields(cls, v):
         if v is None or v == '':
-            return None
+            return 'default' if v == 'REDIS_USER' else 'redis'
         return clean_template_var(str(v))
     
     @property
@@ -125,12 +125,7 @@ class Settings(BaseSettings):
                 pass
             
         # Construct Redis URL from components
-        auth = ""
-        if self.REDIS_USER and self.REDIS_PASSWORD:
-            auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@"
-        elif self.REDIS_PASSWORD:
-            auth = f":{self.REDIS_PASSWORD}@"
-            
+        auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@"
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings

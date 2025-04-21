@@ -114,11 +114,11 @@ async def setup_redis():
                 raise ConnectionError("Redis connection timeout")
             except AuthenticationError as e:
                 logger.error("redis_authentication_failed", error=str(e))
-                # If authentication fails, try without authentication
-                if settings.REDIS_PASSWORD or settings.REDIS_USER:
-                    logger.info("retrying_without_authentication")
-                    settings.REDIS_PASSWORD = None
-                    settings.REDIS_USER = None
+                # If authentication fails, try with default credentials
+                if attempt == 0:  # Only try default credentials on first attempt
+                    logger.info("retrying_with_default_credentials")
+                    settings.REDIS_PASSWORD = "redis"
+                    settings.REDIS_USER = "default"
                     continue
                 raise
             
