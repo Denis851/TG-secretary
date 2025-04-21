@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 from redis import asyncio as aioredis
-from redis.exceptions import ConnectionError
+from redis.exceptions import ConnectionError, AuthenticationError
 from aiohttp import web
 from handlers import checklist, goals, start, progress, mood, schedule, settings, reports
 from services.scheduler import setup_jobs
@@ -101,7 +101,7 @@ async def setup_redis():
                 health_check_interval=30,
                 socket_timeout=5.0,
                 socket_connect_timeout=5.0,
-                retry_on_error=[ConnectionError],
+                retry_on_error=[ConnectionError, AuthenticationError],
                 encoding='utf-8'
             )
             
@@ -112,8 +112,17 @@ async def setup_redis():
                 return redis
             except asyncio.TimeoutError:
                 raise ConnectionError("Redis connection timeout")
+            except AuthenticationError as e:
+                logger.error("redis_authentication_failed", error=str(e))
+                # If authentication fails, try without authentication
+                if settings.REDIS_PASSWORD or settings.REDIS_USER:
+                    logger.info("retrying_without_authentication")
+                    settings.REDIS_PASSWORD = None
+                    settings.REDIS_USER = None
+                    continue
+                raise
             
-        except (ConnectionError, ValueError) as e:
+        except (ConnectionError, ValueError, AuthenticationError) as e:
             if attempt < max_retries - 1:
                 logger.warning(
                     "redis_connection_failed",
