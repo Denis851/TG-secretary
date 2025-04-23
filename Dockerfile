@@ -16,39 +16,15 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install Python dependencies
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 
 # Upgrade pip and install build tools
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir wheel setuptools
 
-# Install dependencies in groups
-RUN pip install --no-cache-dir \
-    aiogram==3.2.0 \
-    python-dotenv==1.0.0 \
-    APScheduler==3.10.1 \
-    pytz==2023.3 \
-    python-dateutil==2.8.2 \
-    aiohttp==3.9.1 \
-    Pillow==9.5.0 \
-    redis==4.6.0 \
-    pydantic==2.4.2 \
-    pydantic-settings==2.0.3 \
-    structlog==23.1.0 \
-    aiohttp-cors==0.7.0 \
-    python-json-logger==2.0.7 \
-    typing-extensions==4.7.1 \
-    asyncio==3.4.3
-
-# Install reportlab separately with its dependencies
-RUN pip install --no-cache-dir reportlab==3.6.12
-
-# Install test dependencies separately
-RUN pip install --no-cache-dir \
-    pytest==7.4.3 \
-    pytest-asyncio==0.21.1 \
-    sphinx==7.1.2
+# Install dependencies from requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Runtime stage
 FROM python:3.11.7-slim
