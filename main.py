@@ -116,22 +116,22 @@ async def setup_redis():
                 logger.error("redis_authentication_failed", error=str(e))
                 # Try different authentication scenarios
                 if attempt == 0:
-                    # First try: try without authentication
+                    # First try: try with Railway's default credentials
+                    logger.info("retrying_with_railway_credentials")
+                    settings.REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', 'redis')
+                    settings.REDIS_USER = os.getenv('REDIS_USER', 'default')
+                    continue
+                elif attempt == 1:
+                    # Second try: try without authentication
                     logger.info("retrying_without_authentication")
                     settings.REDIS_PASSWORD = None
                     settings.REDIS_USER = None
                     continue
-                elif attempt == 1:
-                    # Second try: try with default password only
+                elif attempt == 2:
+                    # Third try: try with default password only
                     logger.info("retrying_with_default_password")
                     settings.REDIS_PASSWORD = "redis"
                     settings.REDIS_USER = None
-                    continue
-                elif attempt == 2:
-                    # Third try: try with default user and password
-                    logger.info("retrying_with_default_credentials")
-                    settings.REDIS_PASSWORD = "redis"
-                    settings.REDIS_USER = "default"
                     continue
                 raise
             
