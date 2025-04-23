@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Redis settings
     REDIS_URL: Optional[str] = Field(None, env='REDIS_URL')
     REDIS_HOST: str = Field(
-        default='localhost',
+        default='redis',
         env='REDIS_HOST'
     )
     REDIS_PORT: int = Field(
@@ -85,9 +85,12 @@ class Settings(BaseSettings):
     @classmethod
     def validate_redis_host(cls, v):
         if v is None or v == '':
-            return 'localhost'
+            return 'redis'
         v = clean_template_var(str(v))
-        return v
+        # Handle both 'redis' and 'redis_host' hostnames
+        if v in ['redis', 'redis_host', 'localhost']:
+            return v
+        return 'redis'  # Default to 'redis' if neither is specified
     
     @field_validator('REDIS_USER', 'REDIS_PASSWORD', mode='before')
     @classmethod
