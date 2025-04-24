@@ -4,7 +4,20 @@ import os
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from urllib.parse import urlparse
-import logging
+import structlog
+
+# Configure structlog
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer()
+    ],
+    wrapper_class=structlog.BoundLogger,
+    context_class=dict,
+    logger_factory=structlog.PrintLoggerFactory(),
+)
+
+logger = structlog.get_logger()
 
 # Load environment variables
 load_dotenv()
