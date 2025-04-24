@@ -3,28 +3,38 @@ import logging
 from redis import asyncio as aioredis
 from config import settings
 import time
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 async def check_redis():
     """Check Redis connection"""
     try:
-        redis = aioredis.from_url(settings.REDIS_URL)
+        redis = aioredis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            retry_on_timeout=True,
+            health_check_interval=30,
+            socket_timeout=5.0,
+            socket_connect_timeout=5.0,
+            retry_on_error=[ConnectionError],
+            encoding='utf-8'
+        )
         await redis.ping()
         await redis.close()
-        return True
+        return True, "OK"
     except Exception as e:
         logger.error("redis_health_check_failed", error=str(e))
-        return False
+        return False, str(e)
 
 async def check_telegram(bot):
     """Check Telegram connection"""
     try:
         await bot.get_me()
-        return True
+        return True, "OK"
     except Exception as e:
         logger.error("telegram_health_check_failed", error=str(e))
-        return False
+        return False, str(e)
 
 async def health_check(request):
     """Health check endpoint for Railway"""
@@ -34,19 +44,25 @@ async def health_check(request):
     bot = request.app['bot']
     
     # Perform health checks
-    redis_ok = await check_redis()
-    telegram_ok = await check_telegram(bot)
+    redis_ok, redis_msg = await check_redis()
+    telegram_ok, telegram_msg = await check_telegram(bot)
     
     # Calculate response time
     response_time = time.time() - start_time
     
     # Prepare response
-    status = 200 if redis_ok and telegram_ok else 500
+    status = 200 if redis_ok and telegram_ok else 503
     response = {
         'status': 'OK' if status == 200 else 'ERROR',
         'checks': {
-            'redis': 'OK' if redis_ok else 'ERROR',
-            'telegram': 'OK' if telegram_ok else 'ERROR'
+            'redis': {
+                'status': 'OK' if redis_ok else 'ERROR',
+                'message': redis_msg
+            },
+            'telegram': {
+                'status': 'OK' if telegram_ok else 'ERROR',
+                'message': telegram_msg
+            }
         },
         'response_time': f"{response_time:.3f}s"
     }
