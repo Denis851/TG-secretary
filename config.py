@@ -130,7 +130,12 @@ class Settings(BaseSettings):
         elif self.REDIS_PASSWORD:
             auth = f":{self.REDIS_PASSWORD}@"
             
-        return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        # For Railway, use the service name as host
+        host = self.REDIS_HOST
+        if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
+            host = 'redis'
+            
+        return f"redis://{auth}{host}:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings
     DATABASE_URL: str = Field(
