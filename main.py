@@ -75,29 +75,19 @@ async def setup_redis():
         try:
             # Get Redis URL from environment
             redis_url = settings.redis_url
+            # Mask password in logs
+            masked_url = redis_url
+            parsed = urlparse(redis_url)
+            if parsed.password:
+                masked_url = masked_url.replace(parsed.password, '***')
+            
             logger.info(
                 "connecting_to_redis",
                 attempt=attempt + 1,
                 max_retries=max_retries,
-                url=redis_url,
+                url=masked_url,
                 environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
             )
-            
-            # Validate Redis URL
-            try:
-                parsed = urlparse(redis_url)
-                if not parsed.scheme or not parsed.hostname:
-                    raise ValueError("Invalid Redis URL format")
-                
-                # Check if port is valid
-                if parsed.port is not None:
-                    try:
-                        int(parsed.port)
-                    except ValueError:
-                        raise ValueError(f"Invalid port in Redis URL: {parsed.port}")
-            except ValueError as e:
-                logger.error("invalid_redis_url", error=str(e), url=redis_url)
-                raise
             
             # Create Redis connection with additional options
             redis = aioredis.from_url(
@@ -117,36 +107,15 @@ async def setup_redis():
                 logger.info("redis_connection_established")
                 return redis
             except asyncio.TimeoutError:
+                logger.error("redis_connection_timeout")
                 raise ConnectionError("Redis connection timeout")
             except AuthenticationError as e:
                 logger.error(
                     "redis_authentication_failed",
                     error=str(e),
-                    url=redis_url,
+                    url=masked_url,
                     attempt=attempt + 1
                 )
-                # In production, don't try different credentials
-                if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
-                    raise
-                # Try different authentication scenarios
-                if attempt == 0:
-                    # First try: try with Railway's default credentials
-                    logger.info("retrying_with_railway_credentials")
-                    settings.REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', 'redis')
-                    settings.REDIS_USER = os.getenv('REDIS_USER', 'default')
-                    continue
-                elif attempt == 1:
-                    # Second try: try without authentication
-                    logger.info("retrying_without_authentication")
-                    settings.REDIS_PASSWORD = None
-                    settings.REDIS_USER = None
-                    continue
-                elif attempt == 2:
-                    # Third try: try with default password only
-                    logger.info("retrying_with_default_password")
-                    settings.REDIS_PASSWORD = "redis"
-                    settings.REDIS_USER = None
-                    continue
                 raise
             
         except (ConnectionError, ValueError, AuthenticationError) as e:
@@ -157,14 +126,14 @@ async def setup_redis():
                     attempt=attempt + 1,
                     max_retries=max_retries,
                     retry_in=retry_delay,
-                    url=redis_url
+                    url=masked_url
                 )
                 await asyncio.sleep(retry_delay)
             else:
                 logger.error(
                     "redis_connection_failed_final",
                     error=str(e),
-                    url=redis_url,
+                    url=masked_url,
                     environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
                 )
                 raise

@@ -124,34 +124,40 @@ class Settings(BaseSettings):
                     # Validate the URL
                     parsed = urlparse(railway_redis_url)
                     if parsed.scheme and parsed.hostname:
-                        logger.info("using_railway_redis_url", url=railway_redis_url)
+                        # Mask password in logs
+                        masked_url = railway_redis_url
+                        if parsed.password:
+                            masked_url = masked_url.replace(parsed.password, '***')
+                        logger.info("using_railway_redis_url", url=masked_url)
                         return railway_redis_url
+                except ValueError as e:
+                    logger.error("invalid_railway_redis_url", error=str(e))
+                    pass
+            else:
+                logger.warning("railway_redis_url_not_found")
+        
+        # For local development
+        if not os.getenv('RAILWAY_ENVIRONMENT'):
+            # Check for local REDIS_URL setting
+            if self.REDIS_URL and self.REDIS_URL != 'REDIS_URL' and not self.REDIS_URL.startswith('${'):
+                try:
+                    parsed = urlparse(self.REDIS_URL)
+                    if parsed.scheme and parsed.hostname:
+                        return self.REDIS_URL
                 except ValueError:
                     pass
+                
+            # Construct Redis URL from components for local development
+            auth = ""
+            if self.REDIS_USER and self.REDIS_PASSWORD:
+                auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@"
+            elif self.REDIS_PASSWORD:
+                auth = f":{self.REDIS_PASSWORD}@"
+                
+            return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
         
-        # Check for our REDIS_URL setting
-        if self.REDIS_URL and self.REDIS_URL != 'REDIS_URL' and not self.REDIS_URL.startswith('${'):
-            try:
-                # Validate the URL
-                parsed = urlparse(self.REDIS_URL)
-                if parsed.scheme and parsed.hostname:
-                    return self.REDIS_URL
-            except ValueError:
-                pass
-            
-        # Construct Redis URL from components
-        auth = ""
-        if self.REDIS_USER and self.REDIS_PASSWORD:
-            auth = f"{self.REDIS_USER}:{self.REDIS_PASSWORD}@"
-        elif self.REDIS_PASSWORD:
-            auth = f":{self.REDIS_PASSWORD}@"
-            
-        # For Railway, use the service name as host
-        host = self.REDIS_HOST
-        if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
-            host = 'redis'
-            
-        return f"redis://{auth}{host}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        # If we're in production but no valid URL was found
+        raise ValueError("No valid Redis URL configuration found for production environment")
     
     # Database settings
     DATABASE_URL: str = Field(
