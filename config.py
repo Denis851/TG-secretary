@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from urllib.parse import urlparse
+import logging
 
 # Load environment variables
 load_dotenv()
@@ -102,16 +103,18 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         """Get Redis URL from environment or construct from components"""
-        # Check for Railway's REDIS_URL
-        railway_redis_url = os.getenv('REDIS_URL')
-        if railway_redis_url and railway_redis_url != 'REDIS_URL' and not railway_redis_url.startswith('${'):
-            try:
-                # Validate the URL
-                parsed = urlparse(railway_redis_url)
-                if parsed.scheme and parsed.hostname:
-                    return railway_redis_url
-            except ValueError:
-                pass
+        # In production (Railway), always use REDIS_URL if available
+        if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
+            railway_redis_url = os.getenv('REDIS_URL')
+            if railway_redis_url and railway_redis_url != 'REDIS_URL' and not railway_redis_url.startswith('${'):
+                try:
+                    # Validate the URL
+                    parsed = urlparse(railway_redis_url)
+                    if parsed.scheme and parsed.hostname:
+                        logger.info("using_railway_redis_url", url=railway_redis_url)
+                        return railway_redis_url
+                except ValueError:
+                    pass
         
         # Check for our REDIS_URL setting
         if self.REDIS_URL and self.REDIS_URL != 'REDIS_URL' and not self.REDIS_URL.startswith('${'):

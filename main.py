@@ -75,7 +75,13 @@ async def setup_redis():
         try:
             # Get Redis URL from environment
             redis_url = settings.redis_url
-            logger.info("connecting_to_redis", attempt=attempt + 1, max_retries=max_retries, url=redis_url)
+            logger.info(
+                "connecting_to_redis",
+                attempt=attempt + 1,
+                max_retries=max_retries,
+                url=redis_url,
+                environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
+            )
             
             # Validate Redis URL
             try:
@@ -113,7 +119,15 @@ async def setup_redis():
             except asyncio.TimeoutError:
                 raise ConnectionError("Redis connection timeout")
             except AuthenticationError as e:
-                logger.error("redis_authentication_failed", error=str(e))
+                logger.error(
+                    "redis_authentication_failed",
+                    error=str(e),
+                    url=redis_url,
+                    attempt=attempt + 1
+                )
+                # In production, don't try different credentials
+                if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
+                    raise
                 # Try different authentication scenarios
                 if attempt == 0:
                     # First try: try with Railway's default credentials
@@ -142,11 +156,17 @@ async def setup_redis():
                     error=str(e),
                     attempt=attempt + 1,
                     max_retries=max_retries,
-                    retry_in=retry_delay
+                    retry_in=retry_delay,
+                    url=redis_url
                 )
                 await asyncio.sleep(retry_delay)
             else:
-                logger.error("redis_connection_failed_final", error=str(e))
+                logger.error(
+                    "redis_connection_failed_final",
+                    error=str(e),
+                    url=redis_url,
+                    environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
+                )
                 raise
 
 async def main():
