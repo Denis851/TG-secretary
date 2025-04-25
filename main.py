@@ -168,43 +168,50 @@ async def check_and_terminate_duplicate_instances(bot: Bot) -> bool:
         return False
 
 async def main():
-    # Initialize structlog
-    structlog.configure(
-        processors=[
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer()
-        ]
-    )
-    
-    # Add startup delay
-    startup_delay = int(os.getenv('STARTUP_DELAY', '30'))
-    logger.info(f"Waiting {startup_delay} seconds before starting...")
-    await asyncio.sleep(startup_delay)
-    
-    # Create web application first
-    app = web.Application()
-    logger.info("Web application created")
-    
-    # Add simple health check that responds immediately
-    async def simple_health_check(request):
-        return web.json_response({
-            'status': 'STARTING',
-            'message': 'Application is starting up',
-            'startup_time': time.time()
-        })
-    
-    app.router.add_get('/health', simple_health_check)
-    logger.info("Simple health check endpoint added")
-    
-    # Setup web server first
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.getenv('PORT', 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Web server started on port {port}")
+    # Initialize variables
+    dp = None
+    bot = None
+    redis_client = None
+    runner = None
+    keep_alive_task = None
     
     try:
+        # Initialize structlog
+        structlog.configure(
+            processors=[
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.JSONRenderer()
+            ]
+        )
+        
+        # Add startup delay
+        startup_delay = int(os.getenv('STARTUP_DELAY', '30'))
+        logger.info(f"Waiting {startup_delay} seconds before starting...")
+        await asyncio.sleep(startup_delay)
+        
+        # Create web application first
+        app = web.Application()
+        logger.info("Web application created")
+        
+        # Add simple health check that responds immediately
+        async def simple_health_check(request):
+            return web.json_response({
+                'status': 'STARTING',
+                'message': 'Application is starting up',
+                'startup_time': time.time()
+            })
+        
+        app.router.add_get('/health', simple_health_check)
+        logger.info("Simple health check endpoint added")
+        
+        # Setup web server first
+        runner = web.AppRunner(app)
+        await runner.setup()
+        port = int(os.getenv('PORT', 8080))
+        site = web.TCPSite(runner, '0.0.0.0', port)
+        await site.start()
+        logger.info(f"Web server started on port {port}")
+        
         # Setup Redis with retries
         redis_client = await setup_redis()
         if not redis_client:
@@ -256,19 +263,23 @@ async def main():
         logger.error("Error during bot execution", error=str(e))
     finally:
         # Cancel keep-alive task if it exists
-        if 'keep_alive_task' in locals():
+        if keep_alive_task is not None:
             keep_alive_task.cancel()
             try:
                 await keep_alive_task
             except asyncio.CancelledError:
                 pass
         
-        # Stop web server
-        await runner.cleanup()
-        logger.info("Web server stopped")
+        # Stop web server if it exists
+        if runner is not None:
+            await runner.cleanup()
+            logger.info("Web server stopped")
         
-        # Shutdown
-        await on_shutdown(dp, bot, redis_client)
+        # Shutdown if components are initialized
+        if dp is not None and bot is not None and redis_client is not None:
+            await on_shutdown(dp, bot, redis_client)
+        else:
+            logger.warning("Some components were not initialized, skipping shutdown")
 
 if __name__ == '__main__':
     try:
