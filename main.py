@@ -102,17 +102,16 @@ async def setup_redis() -> Optional[Redis]:
     for attempt in range(max_retries):
         try:
             # Use settings.redis_url which handles Railway environment
-            redis_url = settings.redis_url
+            redis_url = os.getenv('REDIS_URL')
             logger.info(f"Attempting to connect to Redis (attempt {attempt + 1}/{max_retries})")
             
+            # Create Redis client with basic retry configuration
             redis_client = Redis.from_url(
                 url=redis_url,
                 decode_responses=True,
-                retry=Retry(
-                    ExponentialBackoff(),
-                    3,
-                    retry_on_error=[ConnectionError, TimeoutError, AuthenticationError]
-                ),
+                socket_timeout=5.0,
+                socket_connect_timeout=5.0,
+                retry_on_timeout=True,
                 health_check_interval=30
             )
             
