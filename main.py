@@ -5,7 +5,7 @@ import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
-from redis import asyncio as aioredis
+from redis import asyncio as redis
 from redis.exceptions import ConnectionError, AuthenticationError
 from aiohttp import web
 from handlers import checklist, goals, start, progress, mood, schedule, reports
@@ -22,7 +22,6 @@ from typing import Optional
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramConflictError
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-import redis.asyncio as redis
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import TimeoutError
