@@ -102,7 +102,17 @@ async def setup_redis() -> Optional[Redis]:
     for attempt in range(max_retries):
         try:
             # Get Redis URL from settings
-            redis_url = settings.redis_url
+            if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
+                # For Railway environment, construct the URL using internal hostname
+                redis_password = os.getenv('REDIS_PASSWORD', '')
+                redis_url = f"redis://default:{redis_password}@redis.railway.internal:6379/0"
+                logger.info("Using Railway internal Redis URL")
+            else:
+                # For local development
+                redis_url = settings.redis_url
+                logger.info("Using local Redis URL")
+
+            # Mask password for logging
             masked_url = redis_url
             if 'default:' in redis_url:
                 masked_url = redis_url.replace(redis_url.split('default:')[1].split('@')[0], '***')
@@ -131,7 +141,8 @@ async def setup_redis() -> Optional[Redis]:
                         attempt=attempt + 1, 
                         max_retries=max_retries,
                         env=os.getenv('RAILWAY_ENVIRONMENT'),
-                        redis_host=os.getenv('REDIS_HOST'))
+                        redis_host=os.getenv('REDIS_HOST'),
+                        redis_url=masked_url)
             
             if attempt < max_retries - 1:
                 logger.info(f"Waiting {retry_delay} seconds before next attempt...")
@@ -202,22 +213,11 @@ async def main():
                    if k not in ['BOT_TOKEN', 'REDIS_PASSWORD']}
         logger.debug("Environment variables", **env_vars)
         
-        # Get Redis URL from environment or construct it
-        redis_host = os.getenv('REDIS_HOST', 'localhost')
-        redis_port = os.getenv('REDIS_PORT', '6379')
-        redis_password = os.getenv('REDIS_PASSWORD', '')
-        redis_url = os.getenv('REDIS_URL')
-        
-        if not redis_url and redis_host:
-            if redis_password:
-                redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}"
-            else:
-                redis_url = f"redis://{redis_host}:{redis_port}"
-            os.environ['REDIS_URL'] = redis_url
-            logger.info("Constructed Redis URL from components")
-        
         # Validate required environment variables
         required_vars = ['BOT_TOKEN']
+        if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
+            required_vars.append('REDIS_PASSWORD')
+            
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error("Missing required environment variables", missing_vars=missing_vars)
@@ -233,11 +233,11 @@ async def main():
                 return web.json_response({
                     'status': 'STARTING',
                     'message': 'Application is starting up',
-                    'startup_time': time.time(),
-                    'redis_url': redis_url.replace(redis_password, '***') if redis_password else redis_url
+                    'startup_time': time.time()
                 })
             
-            app.router.add_get('/health', simple_health_check)
+            # Use app.router.add_route instead of add_get to have more control
+            app.router.add_route('GET', '/health', simple_health_check)
             logger.info("Simple health check endpoint added")
             
             # Setup web server first
@@ -294,6 +294,13 @@ async def main():
             logger.info("Routers included")
             
             # Replace simple health check with full health check
+            # Remove the old route first
+            for route in list(app.router.routes()):
+                if str(route.resource.canonical) == '/health':
+                    app.router.routes().remove(route)
+                    logger.info("Removed simple health check route")
+                    break
+                    
             setup_health_check(app, bot)
             logger.info("Full health check setup completed")
             

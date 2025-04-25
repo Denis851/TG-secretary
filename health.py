@@ -59,66 +59,57 @@ async def check_telegram(bot) -> Tuple[bool, str]:
             else:
                 return False, str(e)
 
-async def health_check(request):
-    """Enhanced health check endpoint with detailed status information"""
-    try:
-        # Get application state
-        app_state = request.app.get('app_state', {})
-        initialization_stage = app_state.get('initialization_stage', 'unknown')
-        startup_time = app_state.get('startup_time', time.time())
-        uptime = time.time() - startup_time
-        
-        # Get Redis status
-        redis_status = "unknown"
-        if request.app.get('redis_client'):
-            try:
-                await request.app['redis_client'].ping()
-                redis_status = "connected"
-            except Exception as e:
-                redis_status = f"error: {str(e)}"
-        
-        # Get bot status
-        bot_status = "unknown"
-        if request.app.get('bot'):
-            try:
-                bot_info = await request.app['bot'].get_me()
-                bot_status = f"connected as @{bot_info.username}"
-            except Exception as e:
-                bot_status = f"error: {str(e)}"
-        
-        # Prepare response
-        response = {
-            'status': 'healthy' if initialization_stage == 'ready' else 'starting',
-            'initialization_stage': initialization_stage,
-            'uptime_seconds': round(uptime, 2),
-            'startup_time': startup_time,
-            'redis_status': redis_status,
-            'bot_status': bot_status,
-            'environment': os.getenv('RAILWAY_ENVIRONMENT', 'unknown'),
-            'version': os.getenv('RAILWAY_GIT_COMMIT_SHA', 'unknown')
-        }
-        
-        # Set appropriate status code
-        status_code = 200 if initialization_stage == 'ready' else 503
-        
-        return web.json_response(response, status=status_code)
-    except Exception as e:
-        logger.error("Health check failed", error=str(e))
-        return web.json_response({
-            'status': 'error',
-            'error': str(e)
-        }, status=500)
-
-def setup_health_check(app, bot):
-    """Setup health check endpoint with application state tracking"""
-    app['app_state'] = {
+def setup_health_check(app: web.Application, bot: Bot) -> None:
+    """Setup health check endpoint"""
+    app_state = {
         'startup_time': time.time(),
-        'initialization_stage': 'starting'
+        'last_check_time': time.time(),
+        'status': 'READY',
+        'bot_info': None,
+        'redis_status': 'unknown'
     }
     
-    # Add health check endpoint
-    app.router.add_get('/health', health_check)
+    async def health_check(request: web.Request) -> web.Response:
+        try:
+            # Update bot info
+            if not app_state['bot_info']:
+                try:
+                    app_state['bot_info'] = await bot.get_me()
+                except Exception as e:
+                    logger.error("Failed to get bot info", error=str(e))
+            
+            # Check Redis connection
+            redis_client = request.app.get('redis_client')
+            if redis_client:
+                try:
+                    await redis_client.ping()
+                    app_state['redis_status'] = 'connected'
+                except Exception as e:
+                    app_state['redis_status'] = 'error'
+                    logger.error("Redis health check failed", error=str(e))
+            
+            # Update check time
+            app_state['last_check_time'] = time.time()
+            
+            return web.json_response({
+                'status': app_state['status'],
+                'uptime': time.time() - app_state['startup_time'],
+                'last_check': app_state['last_check_time'],
+                'bot_info': str(app_state['bot_info']) if app_state['bot_info'] else None,
+                'redis_status': app_state['redis_status']
+            })
+            
+        except Exception as e:
+            logger.error("Health check failed", error=str(e))
+            return web.json_response({
+                'status': 'ERROR',
+                'error': str(e)
+            }, status=500)
     
-    # Update state when application is ready
-    app['app_state']['initialization_stage'] = 'ready'
+    # Store app state
+    app['app_state'] = app_state
+    
+    # Register health check route using add_route
+    app.router.add_route('GET', '/health', health_check)
+
     logger.info("Health check endpoint setup completed") 
