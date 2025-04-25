@@ -73,7 +73,7 @@ async def on_shutdown(dp: Dispatcher, bot: Bot, redis_client: Optional[Redis]):
     # Close Redis connection
     if redis_client is not None:
         try:
-            await redis_client.close()
+            await redis_client.aclose()
             logger.info("Redis connection closed")
         except Exception as e:
             logger.error("Error closing Redis connection", error=str(e))
@@ -233,19 +233,11 @@ async def main():
             app = web.Application()
             logger.info("Web application created")
             
-            # Add simple health check that responds immediately
-            async def simple_health_check(request):
-                return web.json_response({
-                    'status': 'STARTING',
-                    'message': 'Application is starting up',
-                    'startup_time': time.time()
-                })
+            # Setup health check first, before the router is frozen
+            setup_health_check(app, bot)
+            logger.info("Health check endpoint added")
             
-            # Use app.router.add_route instead of add_get to have more control
-            app.router.add_route('GET', '/health', simple_health_check)
-            logger.info("Simple health check endpoint added")
-            
-            # Setup web server first
+            # Setup web server
             runner = web.AppRunner(app)
             await runner.setup()
             port = int(os.getenv('PORT', 8080))
@@ -264,7 +256,6 @@ async def main():
                 logger.error("Could not establish Redis connection. Exiting...")
                 return
             
-            # Store Redis client in app state
             app[REDIS_CLIENT_KEY] = redis_client
             logger.info("Redis client initialized and stored in app state")
 
@@ -298,22 +289,6 @@ async def main():
             dp.include_router(reports.router)
             dp.include_router(settings_handler.router)
             logger.info("Routers included")
-            
-            # Replace simple health check with full health check
-            # Remove the old route first
-            routes_to_remove = []
-            for route in app.router.routes():
-                if str(route.resource.canonical) == '/health':
-                    routes_to_remove.append(route)
-                    logger.info("Found health check route to remove")
-                    
-            # Remove routes outside the loop
-            for route in routes_to_remove:
-                app.router._resources.remove(route.resource)
-                logger.info("Removed health check route")
-                    
-            setup_health_check(app, bot)
-            logger.info("Full health check setup completed")
             
             # Start keep-alive service
             keep_alive_task = asyncio.create_task(start_keep_alive())

@@ -4,7 +4,7 @@ from redis import asyncio as aioredis
 from config import settings
 import time
 import structlog
-from typing import Tuple
+from typing import Tuple, Optional
 import asyncio
 import os
 from aiogram import Bot
@@ -65,26 +65,41 @@ async def check_telegram(bot) -> Tuple[bool, str]:
             else:
                 return False, str(e)
 
-def setup_health_check(app: web.Application, bot: Bot) -> None:
+def setup_health_check(app: web.Application, bot: Optional[Bot] = None) -> None:
     """Setup health check endpoint"""
     app_state = {
         'startup_time': time.time(),
         'last_check_time': time.time(),
-        'status': 'READY',
+        'status': 'STARTING',
         'bot_info': None,
-        'redis_status': 'unknown'
+        'redis_status': 'unknown',
+        'initialization_complete': False
     }
     
     async def health_check(request: web.Request) -> web.Response:
         try:
-            # Update bot info
-            if not app_state['bot_info']:
+            current_time = time.time()
+            uptime = current_time - app_state['startup_time']
+            
+            # If we're still in startup phase, return 503
+            if not app_state['initialization_complete'] and uptime < 120:  # 2 minute grace period
+                return web.json_response({
+                    'status': 'STARTING',
+                    'message': 'Application is initializing',
+                    'uptime': uptime,
+                    'startup_time': app_state['startup_time']
+                }, status=503)
+            
+            # Update bot info if available
+            if bot and not app_state['bot_info']:
                 try:
                     app_state['bot_info'] = await bot.get_me()
+                    app_state['status'] = 'READY'
                 except Exception as e:
                     logger.error("Failed to get bot info", error=str(e))
+                    app_state['status'] = 'DEGRADED'
             
-            # Check Redis connection
+            # Check Redis connection if available
             redis_client = request.app.get(REDIS_CLIENT_KEY)
             if redis_client:
                 try:
@@ -92,18 +107,26 @@ def setup_health_check(app: web.Application, bot: Bot) -> None:
                     app_state['redis_status'] = 'connected'
                 except Exception as e:
                     app_state['redis_status'] = 'error'
+                    app_state['status'] = 'DEGRADED'
                     logger.error("Redis health check failed", error=str(e))
             
             # Update check time
-            app_state['last_check_time'] = time.time()
+            app_state['last_check_time'] = current_time
             
-            return web.json_response({
+            # Prepare response
+            response = {
                 'status': app_state['status'],
-                'uptime': time.time() - app_state['startup_time'],
+                'uptime': uptime,
                 'last_check': app_state['last_check_time'],
                 'bot_info': str(app_state['bot_info']) if app_state['bot_info'] else None,
-                'redis_status': app_state['redis_status']
-            })
+                'redis_status': app_state['redis_status'],
+                'environment': os.getenv('RAILWAY_ENVIRONMENT', 'development')
+            }
+            
+            # Set status code based on state
+            status_code = 200 if app_state['status'] == 'READY' else 503
+            
+            return web.json_response(response, status=status_code)
             
         except Exception as e:
             logger.error("Health check failed", error=str(e))
@@ -112,10 +135,13 @@ def setup_health_check(app: web.Application, bot: Bot) -> None:
                 'error': str(e)
             }, status=500)
     
-    # Store app state
+    # Store app state using AppKey
     app[APP_STATE_KEY] = app_state
     
-    # Register health check route using add_route
+    # Register health check route
     app.router.add_route('GET', '/health', health_check)
-
+    
+    # Mark initialization as complete after setup
+    app_state['initialization_complete'] = True
+    
     logger.info("Health check endpoint setup completed") 
