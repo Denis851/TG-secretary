@@ -179,6 +179,24 @@ async def main():
     app = web.Application()
     logger.info("Web application created")
     
+    # Add simple health check that responds immediately
+    async def simple_health_check(request):
+        return web.json_response({
+            'status': 'STARTING',
+            'message': 'Application is starting up'
+        })
+    
+    app.router.add_get('/health', simple_health_check)
+    logger.info("Simple health check endpoint added")
+    
+    # Setup web server first
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv('PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Web server started on port {port}")
+    
     # Setup Redis with retries
     redis_client = await setup_redis()
     if not redis_client:
@@ -213,17 +231,9 @@ async def main():
     dp.include_router(settings_handler.router)
     logger.info("Routers included")
     
-    # Setup health check
+    # Replace simple health check with full health check
     setup_health_check(app, bot)
-    logger.info("Health check setup completed")
-    
-    # Setup web server
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.getenv('PORT', 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Web server started on port {port}")
+    logger.info("Full health check setup completed")
     
     try:
         # Start keep-alive service

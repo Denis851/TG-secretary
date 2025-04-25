@@ -70,7 +70,8 @@ async def health_check(request):
         'startup_time': request.app.get('startup_time', 'unknown'),
         'uptime': time.time() - request.app.get('startup_time', time.time()),
         'redis_configured': bool(settings.REDIS_URL),
-        'bot_configured': bool(settings.BOT_TOKEN)
+        'bot_configured': bool(settings.BOT_TOKEN),
+        'initialization_stage': request.app.get('initialization_stage', 'unknown')
     }
     
     # Perform health checks
@@ -106,4 +107,5 @@ def setup_health_check(app, bot):
     """Setup health check routes"""
     app['bot'] = bot
     app['startup_time'] = time.time()
+    app['initialization_stage'] = 'ready'
     app.router.add_get('/health', health_check) 
