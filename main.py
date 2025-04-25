@@ -8,7 +8,8 @@ from aiogram.fsm.storage.redis import RedisStorage
 from redis import asyncio as aioredis
 from redis.exceptions import ConnectionError, AuthenticationError
 from aiohttp import web
-from handlers import checklist, goals, start, progress, mood, schedule, settings, reports
+from handlers import checklist, goals, start, progress, mood, schedule, reports
+from handlers import settings as settings_handler
 from services.scheduler import setup_jobs
 from services.keep_alive import KeepAliveService
 from middlewares.rate_limit import RateLimitMiddleware
@@ -216,7 +217,7 @@ async def main():
         dp.include_router(progress.router)
         dp.include_router(schedule.router)
         dp.include_router(mood.router)
-        dp.include_router(settings.router)
+        dp.include_router(settings_handler.router)
         dp.include_router(reports.router)
 
         # Инициализация планировщика задач
