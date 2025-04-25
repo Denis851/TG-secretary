@@ -175,6 +175,10 @@ async def main():
         ]
     )
     
+    # Create web application first
+    app = web.Application()
+    logger.info("Web application created")
+    
     # Setup Redis with retries
     redis_client = await setup_redis()
     if not redis_client:
@@ -184,6 +188,7 @@ async def main():
     # Initialize bot and dispatcher
     session = AiohttpSession()
     bot = Bot(token=settings.BOT_TOKEN, session=session)
+    logger.info("Bot initialized")
     
     # Check for and terminate any duplicate instances
     if not await check_and_terminate_duplicate_instances(bot):
@@ -191,10 +196,12 @@ async def main():
         return
     
     dp = Dispatcher(storage=RedisStorage(redis=redis_client))
+    logger.info("Dispatcher initialized")
     
     # Register middlewares
     dp.message.middleware(GlobalErrorHandler())
     dp.message.middleware(RateLimitMiddleware(redis_client))
+    logger.info("Middlewares registered")
     
     # Include routers
     dp.include_router(start.router)
@@ -204,10 +211,11 @@ async def main():
     dp.include_router(progress.router)
     dp.include_router(reports.router)
     dp.include_router(settings_handler.router)
+    logger.info("Routers included")
     
-    # Create web application
-    app = web.Application()
+    # Setup health check
     setup_health_check(app, bot)
+    logger.info("Health check setup completed")
     
     # Setup web server
     runner = web.AppRunner(app)
@@ -220,6 +228,7 @@ async def main():
     try:
         # Start keep-alive service
         keep_alive_task = asyncio.create_task(start_keep_alive())
+        logger.info("Keep-alive service started")
         
         # Start polling
         logger.info("Starting bot polling...")

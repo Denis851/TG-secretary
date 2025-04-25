@@ -65,6 +65,14 @@ async def health_check(request):
     # Get bot instance from app
     bot = request.app['bot']
     
+    # Get application state
+    app_state = {
+        'startup_time': request.app.get('startup_time', 'unknown'),
+        'uptime': time.time() - request.app.get('startup_time', time.time()),
+        'redis_configured': bool(settings.REDIS_URL),
+        'bot_configured': bool(settings.BOT_TOKEN)
+    }
+    
     # Perform health checks
     redis_ok, redis_msg = await check_redis()
     telegram_ok, telegram_msg = await check_telegram(bot)
@@ -76,14 +84,17 @@ async def health_check(request):
     status = 200 if redis_ok and telegram_ok else 503
     response = {
         'status': 'OK' if status == 200 else 'ERROR',
+        'app_state': app_state,
         'checks': {
             'redis': {
                 'status': 'OK' if redis_ok else 'ERROR',
-                'message': redis_msg
+                'message': redis_msg,
+                'url': settings.REDIS_URL if settings.REDIS_URL else 'not configured'
             },
             'telegram': {
                 'status': 'OK' if telegram_ok else 'ERROR',
-                'message': telegram_msg
+                'message': telegram_msg,
+                'bot_configured': bool(settings.BOT_TOKEN)
             }
         },
         'response_time': f"{response_time:.3f}s"
@@ -94,4 +105,5 @@ async def health_check(request):
 def setup_health_check(app, bot):
     """Setup health check routes"""
     app['bot'] = bot
+    app['startup_time'] = time.time()
     app.router.add_get('/health', health_check) 
