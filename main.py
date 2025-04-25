@@ -58,6 +58,11 @@ scheduler = None
 redis = None
 keep_alive = None
 
+# Application state keys
+REDIS_CLIENT_KEY = web.AppKey('redis_client', Redis)
+BOT_KEY = web.AppKey('bot', Bot)
+APP_STATE_KEY = web.AppKey('app_state', dict)
+
 async def on_shutdown(dp: Dispatcher, bot: Bot, redis_client: Optional[Redis]):
     logger.info("Shutting down bot...")
     
@@ -259,7 +264,8 @@ async def main():
                 logger.error("Could not establish Redis connection. Exiting...")
                 return
             
-            app['redis_client'] = redis_client
+            # Store Redis client in app state
+            app[REDIS_CLIENT_KEY] = redis_client
             logger.info("Redis client initialized and stored in app state")
 
             # Initialize bot and dispatcher
@@ -267,7 +273,7 @@ async def main():
             bot = Bot(token=settings.BOT_TOKEN, session=session)
             logger.info("Bot initialized")
             
-            app['bot'] = bot
+            app[BOT_KEY] = bot
             logger.info("Bot stored in app state")
             
             # Check for and terminate any duplicate instances
@@ -295,11 +301,16 @@ async def main():
             
             # Replace simple health check with full health check
             # Remove the old route first
-            for route in list(app.router.routes()):
+            routes_to_remove = []
+            for route in app.router.routes():
                 if str(route.resource.canonical) == '/health':
-                    app.router.routes().remove(route)
-                    logger.info("Removed simple health check route")
-                    break
+                    routes_to_remove.append(route)
+                    logger.info("Found health check route to remove")
+                    
+            # Remove routes outside the loop
+            for route in routes_to_remove:
+                app.router._resources.remove(route.resource)
+                logger.info("Removed health check route")
                     
             setup_health_check(app, bot)
             logger.info("Full health check setup completed")

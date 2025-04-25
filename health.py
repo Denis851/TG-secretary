@@ -11,6 +11,11 @@ from aiogram import Bot
 
 logger = structlog.get_logger()
 
+# Application state keys
+REDIS_CLIENT_KEY = web.AppKey('redis_client', aioredis.Redis)
+BOT_KEY = web.AppKey('bot', Bot)
+APP_STATE_KEY = web.AppKey('app_state', dict)
+
 async def check_redis() -> Tuple[bool, str]:
     """Check Redis connection with retries"""
     max_retries = 3
@@ -80,7 +85,7 @@ def setup_health_check(app: web.Application, bot: Bot) -> None:
                     logger.error("Failed to get bot info", error=str(e))
             
             # Check Redis connection
-            redis_client = request.app.get('redis_client')
+            redis_client = request.app.get(REDIS_CLIENT_KEY)
             if redis_client:
                 try:
                     await redis_client.ping()
@@ -108,7 +113,7 @@ def setup_health_check(app: web.Application, bot: Bot) -> None:
             }, status=500)
     
     # Store app state
-    app['app_state'] = app_state
+    app[APP_STATE_KEY] = app_state
     
     # Register health check route using add_route
     app.router.add_route('GET', '/health', health_check)
