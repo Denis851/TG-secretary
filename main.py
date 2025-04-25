@@ -83,25 +83,50 @@ def signal_handler(signum, frame):
         asyncio.create_task(on_shutdown(dp, bot, redis))
 
 async def setup_redis() -> Optional[Redis]:
-    try:
-        redis_client = Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB,
-            encoding='utf-8',
-            decode_responses=True,
-            retry=Retry(
-                ExponentialBackoff(),
-                3,
-                retry_on_error=[ConnectionError, TimeoutError]
+    """Setup Redis connection with retries"""
+    max_retries = 5
+    retry_delay = 5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            # Use settings.redis_url which handles Railway environment
+            redis_url = settings.redis_url
+            logger.info(f"Attempting to connect to Redis (attempt {attempt + 1}/{max_retries})")
+            
+            redis_client = Redis.from_url(
+                url=redis_url,
+                decode_responses=True,
+                retry=Retry(
+                    ExponentialBackoff(),
+                    3,
+                    retry_on_error=[ConnectionError, TimeoutError, AuthenticationError]
+                ),
+                health_check_interval=30
             )
-        )
-        await redis_client.ping()
-        logger.info("Successfully connected to Redis")
-        return redis_client
-    except Exception as e:
-        logger.error("Failed to connect to Redis", error=str(e))
-        return None
+            
+            # Test connection
+            await redis_client.ping()
+            logger.info("Successfully connected to Redis")
+            return redis_client
+            
+        except (ConnectionError, TimeoutError, AuthenticationError) as e:
+            logger.error(f"Failed to connect to Redis (attempt {attempt + 1}/{max_retries})", 
+                        error=str(e), 
+                        attempt=attempt + 1, 
+                        max_retries=max_retries)
+            
+            if attempt < max_retries - 1:
+                logger.info(f"Waiting {retry_delay} seconds before next attempt...")
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error("Max retries reached. Could not establish Redis connection.")
+                return None
+                
+        except Exception as e:
+            logger.error("Unexpected error while connecting to Redis", 
+                        error=str(e), 
+                        error_type=type(e).__name__)
+            return None
 
 async def delete_webhook_with_retry(bot: Bot, max_retries: int = 3) -> bool:
     for attempt in range(max_retries):
