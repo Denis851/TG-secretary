@@ -101,9 +101,14 @@ async def setup_redis() -> Optional[Redis]:
     
     for attempt in range(max_retries):
         try:
-            # Use settings.redis_url which handles Railway environment
-            redis_url = os.getenv('REDIS_URL')
+            # Get Redis URL from settings
+            redis_url = settings.redis_url
+            masked_url = redis_url
+            if 'default:' in redis_url:
+                masked_url = redis_url.replace(redis_url.split('default:')[1].split('@')[0], '***')
+            
             logger.info(f"Attempting to connect to Redis (attempt {attempt + 1}/{max_retries})")
+            logger.debug("Redis connection details", url=masked_url)
             
             # Create Redis client with basic retry configuration
             redis_client = Redis.from_url(
@@ -124,7 +129,9 @@ async def setup_redis() -> Optional[Redis]:
             logger.error(f"Failed to connect to Redis (attempt {attempt + 1}/{max_retries})", 
                         error=str(e), 
                         attempt=attempt + 1, 
-                        max_retries=max_retries)
+                        max_retries=max_retries,
+                        env=os.getenv('RAILWAY_ENVIRONMENT'),
+                        redis_host=os.getenv('REDIS_HOST'))
             
             if attempt < max_retries - 1:
                 logger.info(f"Waiting {retry_delay} seconds before next attempt...")
@@ -136,7 +143,8 @@ async def setup_redis() -> Optional[Redis]:
         except Exception as e:
             logger.error("Unexpected error while connecting to Redis", 
                         error=str(e), 
-                        error_type=type(e).__name__)
+                        error_type=type(e).__name__,
+                        traceback=traceback.format_exc())
             return None
 
 async def delete_webhook_with_retry(bot: Bot, max_retries: int = 3) -> bool:
