@@ -118,7 +118,20 @@ class Settings(BaseSettings):
         """Get Redis URL from environment or construct from components"""
         # In production (Railway), try different Redis URL variants
         if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
-            # Try REDIS_URL first
+            # Try internal Railway Redis URL first
+            internal_url = f"redis://default:{os.getenv('REDIS_PASSWORD')}@redis.railway.internal:6379"
+            try:
+                parsed = urlparse(internal_url)
+                if parsed.scheme and parsed.hostname:
+                    masked_url = internal_url
+                    if parsed.password:
+                        masked_url = masked_url.replace(parsed.password, '***')
+                    logger.info("using_internal_redis_url", url=masked_url)
+                    return internal_url
+            except ValueError as e:
+                logger.error("invalid_internal_redis_url", error=str(e))
+
+            # Try REDIS_URL from environment
             redis_url = os.getenv('REDIS_URL')
             if redis_url and redis_url != 'REDIS_URL' and not redis_url.startswith('${'):
                 try:
@@ -132,47 +145,32 @@ class Settings(BaseSettings):
                 except ValueError as e:
                     logger.error("invalid_redis_url", error=str(e))
 
-            # Try REDIS_URL from Railway's automatic configuration
-            redis_url = os.getenv('RAILWAY_REDIS_URL')
-            if redis_url and redis_url != 'RAILWAY_REDIS_URL' and not redis_url.startswith('${'):
-                try:
-                    parsed = urlparse(redis_url)
-                    if parsed.scheme and parsed.hostname:
-                        masked_url = redis_url
-                        if parsed.password:
-                            masked_url = masked_url.replace(parsed.password, '***')
-                        logger.info("using_railway_redis_url", url=masked_url)
-                        return redis_url
-                except ValueError as e:
-                    logger.error("invalid_railway_redis_url", error=str(e))
-
-            # Try constructing URL from individual components
+            # Try constructing URL from components as last resort
             host = os.getenv('REDISHOST') or os.getenv('REDIS_HOST', 'redis.railway.internal')
             port = os.getenv('REDISPORT') or os.getenv('REDIS_PORT', '6379')
-            password = (os.getenv('REDISPASSWORD') or 
-                       os.getenv('REDIS_PASSWORD') or 
-                       os.getenv('REDIS_AUTH'))
-            user = os.getenv('REDISUSER') or os.getenv('REDIS_USER', 'default')
+            password = os.getenv('REDIS_PASSWORD')
+            
+            if not password:
+                logger.error("no_redis_password_found")
+                raise ValueError("No Redis password found in environment")
 
-            if password:
-                auth = f"{user}:{password}@" if user else f":{password}@"
-                constructed_url = f"redis://{auth}{host}:{port}/0"
-                try:
-                    parsed = urlparse(constructed_url)
-                    if parsed.scheme and parsed.hostname:
-                        masked_url = constructed_url
-                        if parsed.password:
-                            masked_url = masked_url.replace(parsed.password, '***')
-                        logger.info("using_constructed_redis_url", url=masked_url)
-                        return constructed_url
-                except ValueError as e:
-                    logger.error("invalid_constructed_redis_url", error=str(e))
+            constructed_url = f"redis://default:{password}@{host}:{port}/0"
+            try:
+                parsed = urlparse(constructed_url)
+                if parsed.scheme and parsed.hostname:
+                    masked_url = constructed_url
+                    if parsed.password:
+                        masked_url = masked_url.replace(parsed.password, '***')
+                    logger.info("using_constructed_redis_url", url=masked_url)
+                    return constructed_url
+            except ValueError as e:
+                logger.error("invalid_constructed_redis_url", error=str(e))
 
             logger.error("no_valid_redis_configuration_found")
             raise ValueError("No valid Redis URL configuration found for production environment")
         
         # For local development
-        return f"redis://redis:6379/0"
+        return "redis://redis:6379/0"
     
     # Database settings
     DATABASE_URL: str = Field(

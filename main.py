@@ -102,7 +102,8 @@ async def setup_redis():
                 socket_connect_timeout=10.0,
                 retry_on_error=[ConnectionError, AuthenticationError],
                 encoding='utf-8',
-                max_connections=10
+                max_connections=10,
+                username='default'  # Explicitly set username
             )
             
             # Test connection with timeout
@@ -132,7 +133,9 @@ async def setup_redis():
                     url=masked_url,
                     host=parsed.hostname,
                     port=parsed.port,
-                    attempt=attempt + 1
+                    attempt=attempt + 1,
+                    redis_password_set=bool(os.getenv('REDIS_PASSWORD')),
+                    redis_url_set=bool(os.getenv('REDIS_URL'))
                 )
                 raise
             
@@ -147,7 +150,9 @@ async def setup_redis():
                     retry_in=retry_delay,
                     url=masked_url,
                     host=parsed.hostname,
-                    port=parsed.port
+                    port=parsed.port,
+                    redis_password_set=bool(os.getenv('REDIS_PASSWORD')),
+                    redis_url_set=bool(os.getenv('REDIS_URL'))
                 )
                 await asyncio.sleep(retry_delay)
             else:
@@ -157,7 +162,9 @@ async def setup_redis():
                     url=masked_url,
                     host=parsed.hostname,
                     port=parsed.port,
-                    environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
+                    environment=os.getenv('RAILWAY_ENVIRONMENT', 'development'),
+                    redis_password_set=bool(os.getenv('REDIS_PASSWORD')),
+                    redis_url_set=bool(os.getenv('REDIS_URL'))
                 )
                 raise Exception(f"Failed to connect to Redis after {max_retries} attempts. Last error: {last_error}")
 
