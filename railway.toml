@@ -13,4 +13,13 @@ port = 8080
 [deploy.env]
 PYTHONUNBUFFERED = "1"
 PYTHONPATH = "."
-PORT = "8080" 
+PORT = "8080"
+RAILWAY_ENVIRONMENT = "production"
+
+[[services]]
+name = "worker"
+serviceType = "web"
+
+[[services.dependencies]]
+name = "redis"
+serviceType = "redis" 

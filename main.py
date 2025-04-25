@@ -86,6 +86,8 @@ async def setup_redis():
                 attempt=attempt + 1,
                 max_retries=max_retries,
                 url=masked_url,
+                host=parsed.hostname,
+                port=parsed.port,
                 environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
             )
             
@@ -95,25 +97,38 @@ async def setup_redis():
                 decode_responses=True,
                 retry_on_timeout=True,
                 health_check_interval=30,
-                socket_timeout=5.0,
-                socket_connect_timeout=5.0,
+                socket_timeout=10.0,
+                socket_connect_timeout=10.0,
                 retry_on_error=[ConnectionError, AuthenticationError],
-                encoding='utf-8'
+                encoding='utf-8',
+                max_connections=10
             )
             
             # Test connection with timeout
             try:
-                await asyncio.wait_for(redis.ping(), timeout=5.0)
-                logger.info("redis_connection_established")
+                await asyncio.wait_for(redis.ping(), timeout=10.0)
+                logger.info(
+                    "redis_connection_established",
+                    url=masked_url,
+                    host=parsed.hostname,
+                    port=parsed.port
+                )
                 return redis
             except asyncio.TimeoutError:
-                logger.error("redis_connection_timeout")
+                logger.error(
+                    "redis_connection_timeout",
+                    url=masked_url,
+                    host=parsed.hostname,
+                    port=parsed.port
+                )
                 raise ConnectionError("Redis connection timeout")
             except AuthenticationError as e:
                 logger.error(
                     "redis_authentication_failed",
                     error=str(e),
                     url=masked_url,
+                    host=parsed.hostname,
+                    port=parsed.port,
                     attempt=attempt + 1
                 )
                 raise
@@ -126,7 +141,9 @@ async def setup_redis():
                     attempt=attempt + 1,
                     max_retries=max_retries,
                     retry_in=retry_delay,
-                    url=masked_url
+                    url=masked_url,
+                    host=parsed.hostname,
+                    port=parsed.port
                 )
                 await asyncio.sleep(retry_delay)
             else:
@@ -134,6 +151,8 @@ async def setup_redis():
                     "redis_connection_failed_final",
                     error=str(e),
                     url=masked_url,
+                    host=parsed.hostname,
+                    port=parsed.port,
                     environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
                 )
                 raise
