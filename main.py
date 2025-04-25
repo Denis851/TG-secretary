@@ -26,16 +26,27 @@ from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import TimeoutError
 import time
+import sys
+import traceback
 
-# Настройка структурированного логирования
+# Configure logging before anything else
+logging.basicConfig(
+    level=os.getenv('LOG_LEVEL', 'INFO'),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+
+# Configure structlog
 structlog.configure(
     processors=[
         structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.format_exc_info,
+        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         structlog.processors.JSONRenderer()
     ],
-    wrapper_class=structlog.BoundLogger,
-    context_class=dict,
     logger_factory=structlog.PrintLoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
 )
 
 logger = structlog.get_logger()
@@ -168,109 +179,127 @@ async def check_and_terminate_duplicate_instances(bot: Bot) -> bool:
         return False
 
 async def main():
-    # Initialize variables
-    dp = None
-    bot = None
-    redis_client = None
-    runner = None
-    keep_alive_task = None
-    
     try:
+        logger.info("Starting application...")
+        
+        # Log environment variables (excluding sensitive data)
+        env_vars = {k: v for k, v in os.environ.items() 
+                   if k not in ['BOT_TOKEN', 'REDIS_PASSWORD']}
+        logger.debug("Environment variables", **env_vars)
+        
         # Validate required environment variables
-        required_vars = ['BOT_TOKEN', 'USER_ID', 'REDIS_URL']
+        required_vars = ['BOT_TOKEN', 'REDIS_URL']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error("Missing required environment variables", missing_vars=missing_vars)
-            return
+            sys.exit(1)
 
-        # Initialize structlog
-        structlog.configure(
-            processors=[
-                structlog.processors.TimeStamper(fmt="iso"),
-                structlog.processors.JSONRenderer()
-            ]
-        )
+        # Initialize variables
+        dp = None
+        bot = None
+        redis_client = None
+        runner = None
+        keep_alive_task = None
         
-        logger.info("Starting application initialization")
-        
-        # Add startup delay
-        startup_delay = int(os.getenv('STARTUP_DELAY', '30'))
-        logger.info(f"Waiting {startup_delay} seconds before starting...")
-        await asyncio.sleep(startup_delay)
-        
-        # Create web application first
-        app = web.Application()
-        logger.info("Web application created")
-        
-        # Add simple health check that responds immediately
-        async def simple_health_check(request):
-            return web.json_response({
-                'status': 'STARTING',
-                'message': 'Application is starting up',
-                'startup_time': time.time()
-            })
-        
-        app.router.add_get('/health', simple_health_check)
-        logger.info("Simple health check endpoint added")
-        
-        # Setup web server first
-        runner = web.AppRunner(app)
-        await runner.setup()
-        port = int(os.getenv('PORT', 8080))
-        site = web.TCPSite(runner, '0.0.0.0', port)
-        await site.start()
-        logger.info(f"Web server started on port {port}")
-        
-        # Setup Redis with retries
-        redis_client = await setup_redis()
-        if not redis_client:
-            logger.error("Could not establish Redis connection. Exiting...")
-            return
+        try:
+            # Create web application first
+            app = web.Application()
+            logger.info("Web application created")
+            
+            # Add simple health check that responds immediately
+            async def simple_health_check(request):
+                return web.json_response({
+                    'status': 'STARTING',
+                    'message': 'Application is starting up',
+                    'startup_time': time.time()
+                })
+            
+            app.router.add_get('/health', simple_health_check)
+            logger.info("Simple health check endpoint added")
+            
+            # Setup web server first
+            runner = web.AppRunner(app)
+            await runner.setup()
+            port = int(os.getenv('PORT', 8080))
+            site = web.TCPSite(runner, '0.0.0.0', port)
+            await site.start()
+            logger.info(f"Web server started on port {port}")
+            
+            # Add startup delay
+            startup_delay = int(os.getenv('STARTUP_DELAY', '30'))
+            logger.info(f"Waiting {startup_delay} seconds before continuing initialization...")
+            await asyncio.sleep(startup_delay)
+            
+            # Setup Redis with retries
+            redis_client = await setup_redis()
+            if not redis_client:
+                logger.error("Could not establish Redis connection. Exiting...")
+                return
+            
+            app['redis_client'] = redis_client
+            logger.info("Redis client initialized and stored in app state")
 
-        # Initialize bot and dispatcher
-        session = AiohttpSession()
-        bot = Bot(token=settings.BOT_TOKEN, session=session)
-        logger.info("Bot initialized")
-        
-        # Check for and terminate any duplicate instances
-        if not await check_and_terminate_duplicate_instances(bot):
-            logger.error("Failed to verify bot status. Exiting...")
-            return
-        
-        dp = Dispatcher(storage=RedisStorage(redis=redis_client))
-        logger.info("Dispatcher initialized")
-        
-        # Register middlewares
-        dp.message.middleware(GlobalErrorHandler())
-        dp.message.middleware(RateLimitMiddleware(redis_client))
-        logger.info("Middlewares registered")
-        
-        # Include routers
-        dp.include_router(start.router)
-        dp.include_router(goals.router)
-        dp.include_router(checklist.router)
-        dp.include_router(mood.router)
-        dp.include_router(progress.router)
-        dp.include_router(reports.router)
-        dp.include_router(settings_handler.router)
-        logger.info("Routers included")
-        
-        # Replace simple health check with full health check
-        setup_health_check(app, bot)
-        logger.info("Full health check setup completed")
-        
-        # Start keep-alive service
-        keep_alive_task = asyncio.create_task(start_keep_alive())
-        logger.info("Keep-alive service started")
-        
-        # Start polling
-        logger.info("Starting bot polling...")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    except TelegramConflictError:
-        logger.error("Another instance of the bot is already running")
+            # Initialize bot and dispatcher
+            session = AiohttpSession()
+            bot = Bot(token=settings.BOT_TOKEN, session=session)
+            logger.info("Bot initialized")
+            
+            app['bot'] = bot
+            logger.info("Bot stored in app state")
+            
+            # Check for and terminate any duplicate instances
+            if not await check_and_terminate_duplicate_instances(bot):
+                logger.error("Failed to verify bot status. Exiting...")
+                return
+            
+            dp = Dispatcher(storage=RedisStorage(redis=redis_client))
+            logger.info("Dispatcher initialized")
+            
+            # Register middlewares
+            dp.message.middleware(GlobalErrorHandler())
+            dp.message.middleware(RateLimitMiddleware(redis_client))
+            logger.info("Middlewares registered")
+            
+            # Include routers
+            dp.include_router(start.router)
+            dp.include_router(goals.router)
+            dp.include_router(checklist.router)
+            dp.include_router(mood.router)
+            dp.include_router(progress.router)
+            dp.include_router(reports.router)
+            dp.include_router(settings_handler.router)
+            logger.info("Routers included")
+            
+            # Replace simple health check with full health check
+            setup_health_check(app, bot)
+            logger.info("Full health check setup completed")
+            
+            # Start keep-alive service
+            keep_alive_task = asyncio.create_task(start_keep_alive())
+            logger.info("Keep-alive service started")
+            
+            # Start polling
+            logger.info("Starting bot polling...")
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+            
+        except Exception as e:
+            logger.error(
+                "Error during initialization",
+                error=str(e),
+                error_type=type(e).__name__,
+                traceback=traceback.format_exc()
+            )
+            raise
+            
     except Exception as e:
-        logger.error("Error during bot execution", error=str(e), error_type=type(e).__name__)
-        raise  # Re-raise the exception to see the full traceback
+        logger.error(
+            "Fatal error in main",
+            error=str(e),
+            error_type=type(e).__name__,
+            traceback=traceback.format_exc()
+        )
+        sys.exit(1)
+        
     finally:
         # Cancel keep-alive task if it exists
         if keep_alive_task is not None:
@@ -286,10 +315,15 @@ async def main():
             logger.info("Web server stopped")
         
         # Shutdown if components are initialized
-        if dp is not None and bot is not None and redis_client is not None:
+        if all([dp, bot, redis_client]):
             await on_shutdown(dp, bot, redis_client)
         else:
-            logger.warning("Some components were not initialized, skipping shutdown")
+            logger.warning(
+                "Some components were not initialized, skipping full shutdown",
+                dispatcher=bool(dp),
+                bot=bool(bot),
+                redis=bool(redis_client)
+            )
 
 if __name__ == '__main__':
     try:

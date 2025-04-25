@@ -3,10 +3,10 @@ builder = "nixpacks"
 buildCommand = ""
 
 [deploy]
-startCommand = "python main.py"
+startCommand = "python -u -X dev main.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 120
-healthcheckInterval = 30
+healthcheckInterval = 15
 healthcheckStartPeriod = 180
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
@@ -15,9 +15,12 @@ port = 8080
 [deploy.env]
 PYTHONUNBUFFERED = "1"
 PYTHONPATH = "."
+PYTHONDONTWRITEBYTECODE = "1"
+PYTHONDEVMODE = "1"
 PORT = "8080"
 RAILWAY_ENVIRONMENT = "production"
-STARTUP_DELAY = "60"
+STARTUP_DELAY = "30"
+LOG_LEVEL = "DEBUG"
 
 [[services]]
 name = "worker"
