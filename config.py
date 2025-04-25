@@ -116,28 +116,18 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         """Get Redis URL with proper configuration for Railway"""
-        # First try to get the complete REDIS_URL from environment
-        redis_url = os.getenv('REDIS_URL')
-        if redis_url and redis_url != 'REDIS_URL':
-            logger.info("Using REDIS_URL from environment")
-            return redis_url
-
         # For Railway environment
         if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
-            # Use internal Railway Redis URL
-            password = os.getenv('REDIS_PASSWORD', '')
-            host = 'redis.railway.internal'
-            port = 6379
+            password = os.getenv('REDIS_PASSWORD')
+            if not password:
+                logger.error("REDIS_PASSWORD is required in Railway environment")
+                return ""
             
-            if password:
-                url = f"redis://default:{password}@{host}:{port}/0"
-            else:
-                url = f"redis://{host}:{port}/0"
-                
-            logger.info(f"Using Railway Redis URL with host: {host}")
+            url = f"redis://default:{password}@redis.railway.internal:6379/0"
+            logger.info("Using Railway internal Redis URL")
             return url
 
-        # Local development fallback
+        # For local development
         logger.info("Using local Redis URL")
         return "redis://localhost:6379/0"
     
