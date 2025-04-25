@@ -1,15 +1,15 @@
 [build]
 builder = "nixpacks"
-buildCommand = "pip install -r requirements.txt"
+buildCommand = ""
 
 [deploy]
 startCommand = "python main.py"
 healthcheckPath = "/health"
-healthcheckTimeout = 300
+healthcheckTimeout = 120
 healthcheckInterval = 30
-healthcheckStartPeriod = 120
+healthcheckStartPeriod = 180
 restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 5
+restartPolicyMaxRetries = 10
 port = 8080
 
 [deploy.env]
@@ -17,7 +17,7 @@ PYTHONUNBUFFERED = "1"
 PYTHONPATH = "."
 PORT = "8080"
 RAILWAY_ENVIRONMENT = "production"
-STARTUP_DELAY = "30"
+STARTUP_DELAY = "60"
 
 [[services]]
 name = "worker"

@@ -176,6 +176,13 @@ async def main():
     keep_alive_task = None
     
     try:
+        # Validate required environment variables
+        required_vars = ['BOT_TOKEN', 'USER_ID', 'REDIS_URL']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        if missing_vars:
+            logger.error("Missing required environment variables", missing_vars=missing_vars)
+            return
+
         # Initialize structlog
         structlog.configure(
             processors=[
@@ -183,6 +190,8 @@ async def main():
                 structlog.processors.JSONRenderer()
             ]
         )
+        
+        logger.info("Starting application initialization")
         
         # Add startup delay
         startup_delay = int(os.getenv('STARTUP_DELAY', '30'))
@@ -260,7 +269,8 @@ async def main():
     except TelegramConflictError:
         logger.error("Another instance of the bot is already running")
     except Exception as e:
-        logger.error("Error during bot execution", error=str(e))
+        logger.error("Error during bot execution", error=str(e), error_type=type(e).__name__)
+        raise  # Re-raise the exception to see the full traceback
     finally:
         # Cancel keep-alive task if it exists
         if keep_alive_task is not None:

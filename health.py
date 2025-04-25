@@ -6,6 +6,7 @@ import time
 import structlog
 from typing import Tuple
 import asyncio
+import os
 
 logger = structlog.get_logger()
 
@@ -59,53 +60,65 @@ async def check_telegram(bot) -> Tuple[bool, str]:
                 return False, str(e)
 
 async def health_check(request):
-    """Health check endpoint for Railway"""
-    start_time = time.time()
-    
-    # Get bot instance from app
-    bot = request.app['bot']
-    
-    # Get application state
-    app_state = {
-        'startup_time': request.app.get('startup_time', 'unknown'),
-        'uptime': time.time() - request.app.get('startup_time', time.time()),
-        'redis_configured': bool(settings.REDIS_URL),
-        'bot_configured': bool(settings.BOT_TOKEN),
-        'initialization_stage': request.app.get('initialization_stage', 'unknown')
-    }
-    
-    # Perform health checks
-    redis_ok, redis_msg = await check_redis()
-    telegram_ok, telegram_msg = await check_telegram(bot)
-    
-    # Calculate response time
-    response_time = time.time() - start_time
-    
-    # Prepare response
-    status = 200 if redis_ok and telegram_ok else 503
-    response = {
-        'status': 'OK' if status == 200 else 'ERROR',
-        'app_state': app_state,
-        'checks': {
-            'redis': {
-                'status': 'OK' if redis_ok else 'ERROR',
-                'message': redis_msg,
-                'url': settings.REDIS_URL if settings.REDIS_URL else 'not configured'
-            },
-            'telegram': {
-                'status': 'OK' if telegram_ok else 'ERROR',
-                'message': telegram_msg,
-                'bot_configured': bool(settings.BOT_TOKEN)
-            }
-        },
-        'response_time': f"{response_time:.3f}s"
-    }
-    
-    return web.json_response(response, status=status)
+    """Enhanced health check endpoint with detailed status information"""
+    try:
+        # Get application state
+        app_state = request.app.get('app_state', {})
+        initialization_stage = app_state.get('initialization_stage', 'unknown')
+        startup_time = app_state.get('startup_time', time.time())
+        uptime = time.time() - startup_time
+        
+        # Get Redis status
+        redis_status = "unknown"
+        if request.app.get('redis_client'):
+            try:
+                await request.app['redis_client'].ping()
+                redis_status = "connected"
+            except Exception as e:
+                redis_status = f"error: {str(e)}"
+        
+        # Get bot status
+        bot_status = "unknown"
+        if request.app.get('bot'):
+            try:
+                bot_info = await request.app['bot'].get_me()
+                bot_status = f"connected as @{bot_info.username}"
+            except Exception as e:
+                bot_status = f"error: {str(e)}"
+        
+        # Prepare response
+        response = {
+            'status': 'healthy' if initialization_stage == 'ready' else 'starting',
+            'initialization_stage': initialization_stage,
+            'uptime_seconds': round(uptime, 2),
+            'startup_time': startup_time,
+            'redis_status': redis_status,
+            'bot_status': bot_status,
+            'environment': os.getenv('RAILWAY_ENVIRONMENT', 'unknown'),
+            'version': os.getenv('RAILWAY_GIT_COMMIT_SHA', 'unknown')
+        }
+        
+        # Set appropriate status code
+        status_code = 200 if initialization_stage == 'ready' else 503
+        
+        return web.json_response(response, status=status_code)
+    except Exception as e:
+        logger.error("Health check failed", error=str(e))
+        return web.json_response({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)
 
 def setup_health_check(app, bot):
-    """Setup health check routes"""
-    app['bot'] = bot
-    app['startup_time'] = time.time()
-    app['initialization_stage'] = 'ready'
-    app.router.add_get('/health', health_check) 
+    """Setup health check endpoint with application state tracking"""
+    app['app_state'] = {
+        'startup_time': time.time(),
+        'initialization_stage': 'starting'
+    }
+    
+    # Add health check endpoint
+    app.router.add_get('/health', health_check)
+    
+    # Update state when application is ready
+    app['app_state']['initialization_stage'] = 'ready'
+    logger.info("Health check endpoint setup completed") 
