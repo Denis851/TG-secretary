@@ -168,7 +168,7 @@ async def main():
     dp = Dispatcher(storage=RedisStorage(redis=redis_client))
     
     # Register middlewares
-    dp.message.middleware(ErrorHandler())
+    dp.message.middleware(GlobalErrorHandler())
     dp.message.middleware(RateLimitMiddleware(redis_client))
     
     # Include routers
