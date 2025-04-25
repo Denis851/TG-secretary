@@ -132,6 +132,20 @@ class Settings(BaseSettings):
                 except ValueError as e:
                     logger.error("invalid_redis_url", error=str(e))
 
+            # Try REDIS_URL from Railway's automatic configuration
+            redis_url = os.getenv('RAILWAY_REDIS_URL')
+            if redis_url and redis_url != 'RAILWAY_REDIS_URL' and not redis_url.startswith('${'):
+                try:
+                    parsed = urlparse(redis_url)
+                    if parsed.scheme and parsed.hostname:
+                        masked_url = redis_url
+                        if parsed.password:
+                            masked_url = masked_url.replace(parsed.password, '***')
+                        logger.info("using_railway_redis_url", url=masked_url)
+                        return redis_url
+                except ValueError as e:
+                    logger.error("invalid_railway_redis_url", error=str(e))
+
             # Try constructing URL from individual components
             host = os.getenv('REDISHOST') or os.getenv('REDIS_HOST', 'redis.railway.internal')
             port = os.getenv('REDISPORT') or os.getenv('REDIS_PORT', '6379')

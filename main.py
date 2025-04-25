@@ -70,6 +70,7 @@ async def setup_redis():
     """Настройка Redis с повторными попытками"""
     max_retries = 5
     retry_delay = 5
+    last_error = None
     
     for attempt in range(max_retries):
         try:
@@ -115,17 +116,19 @@ async def setup_redis():
                 )
                 return redis
             except asyncio.TimeoutError:
+                last_error = "Redis connection timeout"
                 logger.error(
                     "redis_connection_timeout",
                     url=masked_url,
                     host=parsed.hostname,
                     port=parsed.port
                 )
-                raise ConnectionError("Redis connection timeout")
+                raise ConnectionError(last_error)
             except AuthenticationError as e:
+                last_error = str(e)
                 logger.error(
                     "redis_authentication_failed",
-                    error=str(e),
+                    error=last_error,
                     url=masked_url,
                     host=parsed.hostname,
                     port=parsed.port,
@@ -134,10 +137,11 @@ async def setup_redis():
                 raise
             
         except (ConnectionError, ValueError, AuthenticationError) as e:
+            last_error = str(e)
             if attempt < max_retries - 1:
                 logger.warning(
                     "redis_connection_failed",
-                    error=str(e),
+                    error=last_error,
                     attempt=attempt + 1,
                     max_retries=max_retries,
                     retry_in=retry_delay,
@@ -149,13 +153,13 @@ async def setup_redis():
             else:
                 logger.error(
                     "redis_connection_failed_final",
-                    error=str(e),
+                    error=last_error,
                     url=masked_url,
                     host=parsed.hostname,
                     port=parsed.port,
                     environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
                 )
-                raise
+                raise Exception(f"Failed to connect to Redis after {max_retries} attempts. Last error: {last_error}")
 
 async def main():
     global bot, dp, scheduler, redis, keep_alive
