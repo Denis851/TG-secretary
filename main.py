@@ -18,6 +18,14 @@ from health import setup_health_check
 from config import settings, clean_template_var
 import structlog
 from urllib.parse import urlparse
+from typing import Optional
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramConflictError
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+import redis.asyncio as redis
+from redis.asyncio.retry import Retry
+from redis.backoff import ExponentialBackoff
+from redis.exceptions import TimeoutError
 
 # Настройка структурированного логирования
 structlog.configure(
@@ -39,221 +47,165 @@ scheduler = None
 redis = None
 keep_alive = None
 
-async def on_shutdown(dispatcher: Dispatcher, bot: Bot):
-    """Действия при завершении работы бота"""
-    logger.info("shutting_down")
+async def on_shutdown(dp: Dispatcher, bot: Bot, redis_client: Optional[redis.Redis]):
+    logger.info("Shutting down bot...")
     
-    # Остановка keep-alive сервиса
-    if keep_alive:
-        await keep_alive.stop()
+    # Delete webhook with retries
+    if not await delete_webhook_with_retry(bot):
+        logger.error("Failed to delete webhook after all retries")
     
-    # Остановка планировщика
-    if scheduler:
-        scheduler.shutdown()
+    # Close Redis connection
+    if redis_client is not None:
+        try:
+            await redis_client.close()
+            logger.info("Redis connection closed")
+        except Exception as e:
+            logger.error("Error closing Redis connection", error=str(e))
     
-    # Закрытие сессии бота
-    if bot and hasattr(bot, 'session'):
+    # Close storage
+    try:
+        if dp.storage:
+            await dp.storage.close()
+        logger.info("Storage closed")
+    except Exception as e:
+        logger.error("Error closing storage", error=str(e))
+    
+    # Close bot session
+    try:
         await bot.session.close()
-    
-    # Закрытие Redis соединения
-    if redis:
-        await redis.close()
-    
-    logger.info("shutdown_complete")
+        logger.info("Bot session closed")
+    except Exception as e:
+        logger.error("Error closing bot session", error=str(e))
 
 def signal_handler(signum, frame):
     """Обработчик сигналов завершения"""
     logger.info("received_signal", signal=signum)
     if dp and bot:
-        asyncio.create_task(on_shutdown(dp, bot))
+        asyncio.create_task(on_shutdown(dp, bot, redis))
 
-async def setup_redis():
-    """Настройка Redis с повторными попытками"""
-    max_retries = 5
-    retry_delay = 5
-    last_error = None
-    
+async def setup_redis() -> Optional[redis.Redis]:
+    try:
+        redis_client = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            encoding='utf-8',
+            decode_responses=True,
+            retry=Retry(
+                ExponentialBackoff(),
+                3,
+                retry_on_error=[ConnectionError, TimeoutError]
+            )
+        )
+        await redis_client.ping()
+        logger.info("Successfully connected to Redis")
+        return redis_client
+    except Exception as e:
+        logger.error("Failed to connect to Redis", error=str(e))
+        return None
+
+async def delete_webhook_with_retry(bot: Bot, max_retries: int = 3) -> bool:
     for attempt in range(max_retries):
         try:
-            # Get Redis URL from environment
-            redis_url = settings.redis_url
-            # Mask password in logs
-            masked_url = redis_url
-            parsed = urlparse(redis_url)
-            if parsed.password:
-                masked_url = masked_url.replace(parsed.password, '***')
-            
-            logger.info(
-                "connecting_to_redis",
+            webhook_info = await bot.get_webhook_info()
+            if webhook_info.url:
+                await bot.delete_webhook(drop_pending_updates=True)
+                logger.info("Successfully deleted webhook")
+            return True
+        except Exception as e:
+            logger.warning(
+                "Failed to delete webhook",
                 attempt=attempt + 1,
                 max_retries=max_retries,
-                url=masked_url,
-                host=parsed.hostname,
-                port=parsed.port,
-                environment=os.getenv('RAILWAY_ENVIRONMENT', 'development')
+                error=str(e)
             )
-            
-            # Create Redis connection with additional options
-            redis = aioredis.from_url(
-                redis_url,
-                decode_responses=True,
-                retry_on_timeout=True,
-                health_check_interval=30,
-                socket_timeout=10.0,
-                socket_connect_timeout=10.0,
-                retry_on_error=[ConnectionError, AuthenticationError],
-                encoding='utf-8',
-                max_connections=10,
-                username='default'  # Explicitly set username
-            )
-            
-            # Test connection with timeout
-            try:
-                await asyncio.wait_for(redis.ping(), timeout=10.0)
-                logger.info(
-                    "redis_connection_established",
-                    url=masked_url,
-                    host=parsed.hostname,
-                    port=parsed.port
-                )
-                return redis
-            except asyncio.TimeoutError:
-                last_error = "Redis connection timeout"
-                logger.error(
-                    "redis_connection_timeout",
-                    url=masked_url,
-                    host=parsed.hostname,
-                    port=parsed.port
-                )
-                raise ConnectionError(last_error)
-            except AuthenticationError as e:
-                last_error = str(e)
-                logger.error(
-                    "redis_authentication_failed",
-                    error=last_error,
-                    url=masked_url,
-                    host=parsed.hostname,
-                    port=parsed.port,
-                    attempt=attempt + 1,
-                    redis_password_set=bool(os.getenv('REDIS_PASSWORD')),
-                    redis_url_set=bool(os.getenv('REDIS_URL'))
-                )
-                raise
-            
-        except (ConnectionError, ValueError, AuthenticationError) as e:
-            last_error = str(e)
             if attempt < max_retries - 1:
-                logger.warning(
-                    "redis_connection_failed",
-                    error=last_error,
-                    attempt=attempt + 1,
-                    max_retries=max_retries,
-                    retry_in=retry_delay,
-                    url=masked_url,
-                    host=parsed.hostname,
-                    port=parsed.port,
-                    redis_password_set=bool(os.getenv('REDIS_PASSWORD')),
-                    redis_url_set=bool(os.getenv('REDIS_URL'))
-                )
-                await asyncio.sleep(retry_delay)
-            else:
-                logger.error(
-                    "redis_connection_failed_final",
-                    error=last_error,
-                    url=masked_url,
-                    host=parsed.hostname,
-                    port=parsed.port,
-                    environment=os.getenv('RAILWAY_ENVIRONMENT', 'development'),
-                    redis_password_set=bool(os.getenv('REDIS_PASSWORD')),
-                    redis_url_set=bool(os.getenv('REDIS_URL'))
-                )
-                raise Exception(f"Failed to connect to Redis after {max_retries} attempts. Last error: {last_error}")
+                await asyncio.sleep(1)
+            continue
+    return False
+
+async def check_and_terminate_duplicate_instances(bot: Bot) -> bool:
+    """Check for and terminate any duplicate bot instances"""
+    try:
+        # Get current webhook info
+        webhook_info = await bot.get_webhook_info()
+        if webhook_info.url:
+            logger.info("Found existing webhook, attempting to delete it")
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Successfully deleted existing webhook")
+        
+        # Try to get bot info to check if it's running
+        bot_info = await bot.get_me()
+        logger.info(f"Bot is running with username: @{bot_info.username}")
+        return True
+    except Exception as e:
+        logger.error(f"Error checking for duplicate instances: {str(e)}")
+        return False
 
 async def main():
-    global bot, dp, scheduler, redis, keep_alive
+    # Initialize structlog
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.JSONRenderer()
+        ]
+    )
+    
+    # Setup Redis with retries
+    redis_client = await setup_redis()
+    if not redis_client:
+        logger.error("Could not establish Redis connection. Exiting...")
+        return
+
+    # Initialize bot and dispatcher
+    session = AiohttpSession()
+    bot = Bot(token=settings.BOT_TOKEN, session=session)
+    
+    # Check for and terminate any duplicate instances
+    if not await check_and_terminate_duplicate_instances(bot):
+        logger.error("Failed to verify bot status. Exiting...")
+        return
+    
+    dp = Dispatcher(storage=RedisStorage(redis=redis_client))
+    
+    # Register middlewares
+    dp.message.middleware(ErrorHandler())
+    dp.message.middleware(RateLimitMiddleware(redis_client))
+    
+    # Include routers
+    dp.include_router(start.router)
+    dp.include_router(goals.router)
+    dp.include_router(checklist.router)
+    dp.include_router(mood.router)
+    dp.include_router(progress.router)
+    dp.include_router(reports.router)
+    dp.include_router(settings_handler.router)
     
     try:
-        # Инициализация Redis с повторными попытками
-        redis = await setup_redis()
+        # Start keep-alive service
+        keep_alive_task = asyncio.create_task(start_keep_alive())
         
-        # Инициализация бота и диспетчера
-        bot = Bot(
-            token=settings.BOT_TOKEN,
-            parse_mode=ParseMode.HTML
-        )
-        
-        # Удаляем webhook с несколькими попытками
-        max_retries = 3
-        retry_delay = 5  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info("attempting_to_delete_webhook", attempt=attempt + 1, max_retries=max_retries)
-                await bot.delete_webhook(drop_pending_updates=True)
-                logger.info("webhook_deleted_successfully")
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    logger.warning("webhook_deletion_failed", error=str(e), retry_in=retry_delay)
-                    await asyncio.sleep(retry_delay)
-                else:
-                    logger.error("webhook_deletion_failed_after_all_attempts", error=str(e))
-                    raise
-        
-        # Инициализация диспетчера с Redis storage
-        storage = RedisStorage(redis=redis)
-        dp = Dispatcher(storage=storage)
-        
-        # Подключаем middleware
-        dp.message.middleware(RateLimitMiddleware(redis))
-        dp.callback_query.middleware(RateLimitMiddleware(redis))
-        dp.message.middleware(GlobalErrorHandler())
-        dp.callback_query.middleware(GlobalErrorHandler())
-
-        # Подключаем handlers
-        dp.include_router(start.router)
-        dp.include_router(checklist.router)
-        dp.include_router(goals.router)
-        dp.include_router(progress.router)
-        dp.include_router(schedule.router)
-        dp.include_router(mood.router)
-        dp.include_router(settings_handler.router)
-        dp.include_router(reports.router)
-
-        # Инициализация планировщика задач
-        scheduler = setup_jobs(bot)
-
-        # Инициализация и запуск keep-alive сервиса
-        keep_alive = KeepAliveService(bot)
-        await keep_alive.start()
-
-        # Установка обработчиков сигналов
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-
-        # Создание и настройка web приложения для health check
-        app = web.Application()
-        setup_health_check(app, bot)
-        
-        # Запуск web сервера в отдельной задаче
-        runner = web.AppRunner(app)
-        await runner.setup()
-        port = int(os.getenv('PORT', 8080))
-        site = web.TCPSite(runner, '0.0.0.0', port)
-        await site.start()
-
-        # Запуск polling
-        logger.info("bot_started")
-        await dp.start_polling(bot)
-        
+        # Start polling
+        logger.info("Starting bot polling...")
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    except TelegramConflictError:
+        logger.error("Another instance of the bot is already running")
     except Exception as e:
-        logger.error("bot_startup_error", error=str(e))
-        raise
+        logger.error("Error during bot execution", error=str(e))
     finally:
-        await on_shutdown(dp, bot)
+        # Cancel keep-alive task if it exists
+        if 'keep_alive_task' in locals():
+            keep_alive_task.cancel()
+            try:
+                await keep_alive_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Shutdown
+        await on_shutdown(dp, bot, redis_client)
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("bot_stopped")
+        logger.info("Bot stopped")
