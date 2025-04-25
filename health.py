@@ -7,6 +7,7 @@ import structlog
 from typing import Tuple
 import asyncio
 import os
+from aiogram import Bot
 
 logger = structlog.get_logger()
 
