@@ -180,6 +180,18 @@ async def main():
     dp.include_router(reports.router)
     dp.include_router(settings_handler.router)
     
+    # Create web application
+    app = web.Application()
+    setup_health_check(app, bot)
+    
+    # Setup web server
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv('PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Web server started on port {port}")
+    
     try:
         # Start keep-alive service
         keep_alive_task = asyncio.create_task(start_keep_alive())
@@ -199,6 +211,10 @@ async def main():
                 await keep_alive_task
             except asyncio.CancelledError:
                 pass
+        
+        # Stop web server
+        await runner.cleanup()
+        logger.info("Web server stopped")
         
         # Shutdown
         await on_shutdown(dp, bot, redis_client)
