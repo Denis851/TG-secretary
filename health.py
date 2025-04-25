@@ -4,37 +4,59 @@ from redis import asyncio as aioredis
 from config import settings
 import time
 import structlog
+from typing import Tuple
+import asyncio
 
 logger = structlog.get_logger()
 
-async def check_redis():
-    """Check Redis connection"""
-    try:
-        redis = aioredis.from_url(
-            settings.REDIS_URL,
-            decode_responses=True,
-            retry_on_timeout=True,
-            health_check_interval=30,
-            socket_timeout=5.0,
-            socket_connect_timeout=5.0,
-            retry_on_error=[ConnectionError],
-            encoding='utf-8'
-        )
-        await redis.ping()
-        await redis.close()
-        return True, "OK"
-    except Exception as e:
-        logger.error("redis_health_check_failed", error=str(e))
-        return False, str(e)
+async def check_redis() -> Tuple[bool, str]:
+    """Check Redis connection with retries"""
+    max_retries = 3
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        try:
+            redis = aioredis.from_url(
+                settings.REDIS_URL,
+                decode_responses=True,
+                retry_on_timeout=True,
+                health_check_interval=30,
+                socket_timeout=5.0,
+                socket_connect_timeout=5.0,
+                retry_on_error=[ConnectionError],
+                encoding='utf-8'
+            )
+            await redis.ping()
+            await redis.close()
+            return True, "OK"
+        except Exception as e:
+            logger.error("redis_health_check_failed", 
+                        error=str(e), 
+                        attempt=attempt + 1, 
+                        max_retries=max_retries)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay)
+            else:
+                return False, str(e)
 
-async def check_telegram(bot):
-    """Check Telegram connection"""
-    try:
-        await bot.get_me()
-        return True, "OK"
-    except Exception as e:
-        logger.error("telegram_health_check_failed", error=str(e))
-        return False, str(e)
+async def check_telegram(bot) -> Tuple[bool, str]:
+    """Check Telegram connection with retries"""
+    max_retries = 3
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        try:
+            await bot.get_me()
+            return True, "OK"
+        except Exception as e:
+            logger.error("telegram_health_check_failed", 
+                        error=str(e), 
+                        attempt=attempt + 1, 
+                        max_retries=max_retries)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay)
+            else:
+                return False, str(e)
 
 async def health_check(request):
     """Health check endpoint for Railway"""

@@ -5,9 +5,9 @@ buildCommand = "pip install -r requirements.txt"
 [deploy]
 startCommand = "python main.py"
 healthcheckPath = "/health"
-healthcheckTimeout = 100
+healthcheckTimeout = 300
 restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 3
+restartPolicyMaxRetries = 5
 port = 8080
 
 [deploy.env]
