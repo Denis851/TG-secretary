@@ -5,7 +5,7 @@ import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
-from redis import asyncio as redis
+from redis.asyncio import Redis
 from redis.exceptions import ConnectionError, AuthenticationError
 from aiohttp import web
 from handlers import checklist, goals, start, progress, mood, schedule, reports
@@ -46,7 +46,7 @@ scheduler = None
 redis = None
 keep_alive = None
 
-async def on_shutdown(dp: Dispatcher, bot: Bot, redis_client: Optional[redis.Redis]):
+async def on_shutdown(dp: Dispatcher, bot: Bot, redis_client: Optional[Redis]):
     logger.info("Shutting down bot...")
     
     # Delete webhook with retries
@@ -82,9 +82,9 @@ def signal_handler(signum, frame):
     if dp and bot:
         asyncio.create_task(on_shutdown(dp, bot, redis))
 
-async def setup_redis() -> Optional[redis.Redis]:
+async def setup_redis() -> Optional[Redis]:
     try:
-        redis_client = redis.Redis(
+        redis_client = Redis(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
             db=settings.REDIS_DB,
