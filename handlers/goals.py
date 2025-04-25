@@ -509,7 +509,8 @@ async def receive_deadline(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error in receive_deadline: {str(e)}")
         await callback.answer("❌ Произошла ошибка", show_alert=True)
         
-    if not state.is_done():
+    current_state = await state.get_state()
+    if current_state is not None:
         await state.clear()
 
 @router.callback_query(F.data == "goals_sort")

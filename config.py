@@ -170,7 +170,7 @@ class Settings(BaseSettings):
             raise ValueError("No valid Redis URL configuration found for production environment")
         
         # For local development
-        return "redis://redis:6379/0"
+        return "redis://localhost:6379/0"
     
     # Database settings
     DATABASE_URL: str = Field(
