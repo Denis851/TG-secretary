@@ -21,6 +21,9 @@ PORT = "8080"
 RAILWAY_ENVIRONMENT = "production"
 STARTUP_DELAY = "30"
 LOG_LEVEL = "DEBUG"
+REDIS_HOST = "${{Secrets.REDIS_HOST}}"
+REDIS_PORT = "6379"
+REDIS_PASSWORD = "${{Secrets.REDIS_PASSWORD}}"
 
 [[services]]
 name = "worker"

@@ -179,6 +179,14 @@ async def check_and_terminate_duplicate_instances(bot: Bot) -> bool:
         return False
 
 async def main():
+    # Initialize variables at the top level of main
+    dp = None
+    bot = None
+    redis_client = None
+    runner = None
+    keep_alive_task = None
+    app = None
+
     try:
         logger.info("Starting application...")
         
@@ -187,20 +195,27 @@ async def main():
                    if k not in ['BOT_TOKEN', 'REDIS_PASSWORD']}
         logger.debug("Environment variables", **env_vars)
         
+        # Get Redis URL from environment or construct it
+        redis_host = os.getenv('REDIS_HOST', 'localhost')
+        redis_port = os.getenv('REDIS_PORT', '6379')
+        redis_password = os.getenv('REDIS_PASSWORD', '')
+        redis_url = os.getenv('REDIS_URL')
+        
+        if not redis_url and redis_host:
+            if redis_password:
+                redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}"
+            else:
+                redis_url = f"redis://{redis_host}:{redis_port}"
+            os.environ['REDIS_URL'] = redis_url
+            logger.info("Constructed Redis URL from components")
+        
         # Validate required environment variables
-        required_vars = ['BOT_TOKEN', 'REDIS_URL']
+        required_vars = ['BOT_TOKEN']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error("Missing required environment variables", missing_vars=missing_vars)
-            sys.exit(1)
+            return
 
-        # Initialize variables
-        dp = None
-        bot = None
-        redis_client = None
-        runner = None
-        keep_alive_task = None
-        
         try:
             # Create web application first
             app = web.Application()
@@ -211,7 +226,8 @@ async def main():
                 return web.json_response({
                     'status': 'STARTING',
                     'message': 'Application is starting up',
-                    'startup_time': time.time()
+                    'startup_time': time.time(),
+                    'redis_url': redis_url.replace(redis_password, '***') if redis_password else redis_url
                 })
             
             app.router.add_get('/health', simple_health_check)
@@ -298,7 +314,7 @@ async def main():
             error_type=type(e).__name__,
             traceback=traceback.format_exc()
         )
-        sys.exit(1)
+        return
         
     finally:
         # Cancel keep-alive task if it exists
