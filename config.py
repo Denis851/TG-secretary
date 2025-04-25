@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # Redis settings
     REDIS_URL: Optional[str] = Field(None, env='REDIS_URL')
     REDIS_HOST: str = Field(
-        default='redis',
+        default="redis.railway.internal",
         env='REDIS_HOST'
     )
     REDIS_PORT: int = Field(
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
         env='REDIS_DB'
     )
     REDIS_PASSWORD: Optional[str] = Field(
-        default=None,
+        default="",
         env='REDIS_PASSWORD'
     )
     REDIS_USER: Optional[str] = Field(
@@ -115,62 +115,25 @@ class Settings(BaseSettings):
     
     @property
     def redis_url(self) -> str:
-        """Get Redis URL from environment or construct from components"""
-        # In production (Railway), try different Redis URL variants
-        if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
-            # Try internal Railway Redis URL first
-            internal_url = f"redis://default:{os.getenv('REDIS_PASSWORD')}@redis.railway.internal:6379"
-            try:
-                parsed = urlparse(internal_url)
-                if parsed.scheme and parsed.hostname:
-                    masked_url = internal_url
-                    if parsed.password:
-                        masked_url = masked_url.replace(parsed.password, '***')
-                    logger.info("using_internal_redis_url", url=masked_url)
-                    return internal_url
-            except ValueError as e:
-                logger.error("invalid_internal_redis_url", error=str(e))
-
-            # Try REDIS_URL from environment
-            redis_url = os.getenv('REDIS_URL')
-            if redis_url and redis_url != 'REDIS_URL' and not redis_url.startswith('${'):
-                try:
-                    parsed = urlparse(redis_url)
-                    if parsed.scheme and parsed.hostname:
-                        masked_url = redis_url
-                        if parsed.password:
-                            masked_url = masked_url.replace(parsed.password, '***')
-                        logger.info("using_redis_url", url=masked_url)
-                        return redis_url
-                except ValueError as e:
-                    logger.error("invalid_redis_url", error=str(e))
-
-            # Try constructing URL from components as last resort
-            host = os.getenv('REDISHOST') or os.getenv('REDIS_HOST', 'redis.railway.internal')
-            port = os.getenv('REDISPORT') or os.getenv('REDIS_PORT', '6379')
-            password = os.getenv('REDIS_PASSWORD')
+        # First try to get the complete REDIS_URL
+        redis_url = os.getenv('REDIS_URL')
+        if redis_url:
+            logger.info("Using provided REDIS_URL")
+            return redis_url
             
-            if not password:
-                logger.error("no_redis_password_found")
-                raise ValueError("No Redis password found in environment")
-
-            constructed_url = f"redis://default:{password}@{host}:{port}/0"
-            try:
-                parsed = urlparse(constructed_url)
-                if parsed.scheme and parsed.hostname:
-                    masked_url = constructed_url
-                    if parsed.password:
-                        masked_url = masked_url.replace(parsed.password, '***')
-                    logger.info("using_constructed_redis_url", url=masked_url)
-                    return constructed_url
-            except ValueError as e:
-                logger.error("invalid_constructed_redis_url", error=str(e))
-
-            logger.error("no_valid_redis_configuration_found")
-            raise ValueError("No valid Redis URL configuration found for production environment")
-        
-        # For local development
-        return "redis://localhost:6379/0"
+        # If we're in Railway and no explicit REDIS_URL, construct internal URL
+        if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
+            password = os.getenv('REDIS_PASSWORD', '')
+            if password:
+                url = f"redis://default:{password}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+            else:
+                url = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+            logger.info("Using internal Railway Redis URL")
+            return url
+            
+        # Local development fallback
+        logger.info("Using local Redis URL")
+        return f"redis://localhost:{self.REDIS_PORT}/{self.REDIS_DB}"
     
     # Database settings
     DATABASE_URL: str = Field(
